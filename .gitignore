@@ -1,0 +1,58 @@
+# Dependencies
+# npm package modules
+node_modules/
+
+# Optional: if you're using pnpm or yarn
+# pnpm-lock.yaml
+# yarn.lock
+# node_modules/.pnpm-state/ # For pnpm v3+
+
+# Environment variables
+# .env files often contain sensitive information like database credentials, API keys, etc.
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Log files
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Build artifacts (if you compile or transpile your code, e.g., from TypeScript)
+build/
+dist/
+out/
+
+# Test coverage reports
+coverage/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE specific files
+# VS Code
+.vscode/
+
+# JetBrains IDEs (WebStorm, IntelliJ, etc.)
+.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Other common editor files
+*.swp
+
+# Uploads / Runtime-generated files (if your server handles file uploads or creates files at runtime)
+# Uncomment and adjust the path if needed
+# uploads/
+# temp/
+
+# Database files (if using a local file-based DB like SQLite)
+# Uncomment and adjust if needed
+# *.sqlite
+# *.db
