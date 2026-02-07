@@ -1,17 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import verifyToken from './middleware/verifyToken.js';
-import supabase from './libs/supabaseClient.js';
-import multer from 'multer'
-import workspaceRouters from './routes/workspaceRoutes.js'
+import workspaceRouters from './routes/workspaceRoutes.js';
+import companyRoutes from './routes/companyRoutes.js'
+import bankRoutes from './routes/bankRoutes.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-const upload = multer();
 
 app.get('/', (req, res) => {
     res.send('WageDesk Backend is running!');
@@ -23,6 +21,8 @@ app.get('/api/ping', (req, res) => {
 });
 
 app.use('/api', workspaceRouters)
+app.use('/api', bankRoutes)
+app.use('/api/company', companyRoutes)
 
 
 const PORT = process.env.PORT || 3001;
