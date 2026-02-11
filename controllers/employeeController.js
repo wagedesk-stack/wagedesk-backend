@@ -1,5 +1,7 @@
 // backend/controllers/employeeController.js
 import supabase from "../libs/supabaseClient.js";
+import { sendEmailService } from "../services/email.js";
+import { dispatchEmail } from "../services/resendService.js";
 import ExcelJS from "exceljs";
 import pkg from "xlsx";
 import { authorize } from "../utils/authorize.js";
@@ -51,18 +53,7 @@ function parseNoDefaultYes(value) {
   return value.toString().trim().toLowerCase() !== "no";
 }
 
-// ----  Function to send emails email ----
-const sendWelcomeEmail = async (toEmail, employeeName, companyName) => {
-  try {
-    //set up to send custom emails and bulk emails
-    console.log(`Welcome email sent to ${toEmail}`);
-  } catch (emailError) {
-    console.error(
-      `Failed to send welcome email to ${toEmail}:`,
-      emailError.message,
-    );
-  }
-};
+// ----  Function to send email ----
 
 // -------------------- Employee Controllers -------------------- //
 
@@ -126,6 +117,99 @@ export const getEmployees = async (req, res) => {
   }
 };
 
+// send emails
+export const sendEmployeeEmail = async (req, res) => {
+  const { companyId } = req.params;
+  const userId = req.userId;
+  const { recipients, subject, body } = req.body;
+
+  console.log("Email Request Details:");
+  console.log("Company ID:", companyId);
+  console.log("User ID:", userId);
+  console.log("Recipients count:", recipients?.length);
+
+  if (!recipients?.length || !subject || !body) {
+    return res.status(400).json({ error: "Missing email fields" });
+  }
+
+  try {
+    // 1 Verify company
+    const { data: company, error: companyError } = await supabase
+      .from("companies")
+      .select("id, business_name, workspace_id")
+      .eq("id", companyId)
+      .single();
+
+    console.log("Company Query Result:", { company, companyError });
+
+    if (companyError || !company) {
+      return res.status(403).json({ error: "Company not found" });
+    }
+
+    // 2️ Authorize
+    const auth = await authorize(
+      userId,
+      company.workspace_id,
+      "EMPLOYEES",
+      "can_write",
+    );
+
+    console.log("Authorization Result:", auth);
+    if (!auth.allowed) {
+      return res.status(403).json({
+        error: "You are not allowed to email employees", // if your authorize function returns details
+      });
+    }
+
+    if (!auth.allowed) {
+      return res.status(403).json({
+        error: "You are not allowed to email employees",
+      });
+    }
+
+    const htmlContent = `
+      <div style="font-family: sans-serif; color: #334155; line-height: 1.6;">
+        <h2 style="color: #0f172a;">Sent from ${company.business_name} via WageDesk</h2>
+        <div style="border-left: 4px solid #6366f1; padding-left: 16px; margin: 20px 0;">
+          ${body}
+        </div>
+        <p style="font-size: 12px; color: #94a3b8;">
+          This is an automated message .
+        </p>
+      </div>
+    `;
+    /*
+    const result = await dispatchEmail({
+      to: recipients,
+      subject,
+      html: htmlContent,
+      text: body, // Fallback text version
+    });*/
+
+    // 3️ Send emails (rate-limited for free tier)
+    for (const email of recipients) {
+      await sendEmailService({
+        to: email,
+        subject,
+        html: htmlContent,
+        text: body,
+        company: company.business_name,
+      });
+
+      // ⏱ Delay to avoid SMTP throttling (FREE TIER SAFE)
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+
+    res.status(200).json({
+      success: true,
+      sent: recipients.length,
+      //messageId: result.id
+    });
+  } catch (emailError) {
+    console.error("Send email error:", error.message);
+    res.status(500).json({ error: "Failed to send emails" });
+  }
+};
 // Get a single employee by ID
 export const getEmployeeById = async (req, res) => {
   const { companyId, employeeId } = req.params;
@@ -814,29 +898,64 @@ export const importEmployees = async (req, res) => {
 
     // 3. Upsert Contract Details
     for (const contract of contractRecords) {
-      const { error: contractError } = await supabase
-        .from("employee_contracts")
-        .upsert(contract, {
-          // This assumes you want to overwrite the existing active contract
-          // if one exists for this employee.
-          onConflict: "employee_id, contract_status",
-          ignoreDuplicates: false,
-        });
+      // Check if we're trying to insert an ACTIVE contract
+      if (contract.contract_status === "ACTIVE") {
+        // First, check if there's already an active contract
+        const { data: existingActive } = await supabase
+          .from("employee_contracts")
+          .select("id")
+          .eq("employee_id", contract.employee_id)
+          .eq("contract_status", "ACTIVE")
+          .maybeSingle();
 
-      if (contractError) {
-        console.error(
-          `Contract error for employee ${contract.employee_id}:`,
-          contractError,
-        );
-        // If the constraint is complex, we can fall back to updating existing active ones to 'EXPIRED'
-        // before inserting a new 'ACTIVE' one, but upsert is cleaner if the constraint matches.
+        if (existingActive) {
+          // Update existing active contract to EXPIRED
+          await supabase
+            .from("employee_contracts")
+            .update({
+              contract_status: "EXPIRED",
+              end_date: contract.start_date, // or new Date()
+            })
+            .eq("id", existingActive.id);
+        }
+
+        // Now insert the new active contract
+        const { error: contractError } = await supabase
+          .from("employee_contracts")
+          .insert(contract);
+
+        if (contractError) {
+          console.error(
+            `Contract error for employee ${contract.employee_id}:`,
+            contractError,
+          );
+          errors.push(
+            `Failed to insert contract for employee ${contract.employee_id}`,
+          );
+        }
+      } else {
+        // For non-active contracts, just insert (no constraint issue)
+        const { error: contractError } = await supabase
+          .from("employee_contracts")
+          .insert(contract);
+
+        if (contractError) {
+          console.error(
+            `Contract error for employee ${contract.employee_id}:`,
+            contractError,
+          );
+          errors.push(
+            `Failed to insert contract for employee ${contract.employee_id}`,
+          );
+        }
       }
     }
 
     if (bankError) {
       console.error("Sub-table insert error:", bankError);
       return res.status(500).json({
-        error: "Bank details update failed", details: bankError.message
+        error: "Bank details update failed",
+        details: bankError.message,
       });
     }
 
@@ -900,7 +1019,7 @@ export const generateEmployeeTemplate = async (req, res) => {
     const templateHeaders = [
       "Employee Number",
       "First Name",
-      "Middle Names",
+      "Middle Name",
       "Last Name",
       "Email",
       "Phone",

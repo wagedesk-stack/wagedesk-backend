@@ -8,7 +8,8 @@ import {
     updateEmployee,
     deleteEmployee,
     importEmployees,
-    generateEmployeeTemplate
+    generateEmployeeTemplate,
+    sendEmployeeEmail
 } from '../controllers/employeeController.js';
 
 const router = express.Router();
@@ -17,6 +18,7 @@ const upload = multer();
 router.get('/:companyId/employees', verifyToken, getEmployees);
 router.get('/:companyId/employees/template', verifyToken, generateEmployeeTemplate);
 router.get('/:companyId/employees/:employeeId', verifyToken, getEmployeeById);
+router.post('/:companyId/employees/email', verifyToken, sendEmployeeEmail);
 router.post('/:companyId/employees', verifyToken, addEmployee);
 router.put('/:companyId/employees/:employeeId', verifyToken, updateEmployee);
 router.post('/:companyId/employees/import', verifyToken, upload.single('file'), importEmployees);

@@ -23,8 +23,10 @@ app.get('/api/ping', (req, res) => {
 
 app.use('/api', workspaceRouters)
 app.use('/api', bankRoutes)
-app.use('/api/company', companyRoutes)
+
 app.use('/api/company', employeesRoutes);
+app.use('/api/company', companyRoutes)
+
 
 
 const PORT = process.env.PORT || 3001;
