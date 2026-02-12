@@ -164,6 +164,16 @@ export const sendEmployeeEmail = async (req, res) => {
       });
     }
 
+    const { data: company, error: companyError } = await supabase
+      .from("companies")
+      .select("id, business_name, workspace_id")
+      .eq("id", companyId)
+      .single();
+
+      if (companyError || !company) {
+      return res.status(403).json({ error: "Company not found" });
+    }
+
     const htmlContent = `
       <div style="font-family: sans-serif; color: #334155; line-height: 1.6;">
         <h2 style="color: #0f172a;">Sent from ${company.business_name} via WageDesk</h2>
@@ -203,9 +213,10 @@ export const sendEmployeeEmail = async (req, res) => {
       //messageId: result.id
     });
   } catch (emailError) {
-    console.error("Send email error:", error.message);
-    res.status(500).json({ error: "Failed to send emails" });
-  }
+  console.error("Send email error:", emailError.message);
+  res.status(500).json({ error: "Failed to send emails" });
+}
+
 };
 // Get a single employee by ID
 export const getEmployeeById = async (req, res) => {
