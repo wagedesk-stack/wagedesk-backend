@@ -21,7 +21,7 @@ export default async function verifyToken(req, res, next) {
     req.userId = data.user.id;
 
     // Optional: Add a sharp logging detail for your professional console
-    console.log(`[Auth]: ${data.user.email} accessing ${req.path}`);
+    //console.log(`[Auth]: ${data.user.email} accessing ${req.path}`);
     
     next();
   } catch (error) {

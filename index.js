@@ -5,6 +5,8 @@ import workspaceRouters from './routes/workspaceRoutes.js';
 import companyRoutes from './routes/companyRoutes.js'
 import bankRoutes from './routes/bankRoutes.js';
 import employeesRoutes from './routes/employeesRoutes.js'
+import deductionTypeRoutes from './routes/deductionTypeRoutes.js';
+import allowanceTypeRoutes from './routes/allowanceTypeRoutes.js';
 
 dotenv.config();
 
@@ -26,6 +28,8 @@ app.use('/api', bankRoutes)
 
 app.use('/api/company', employeesRoutes);
 app.use('/api/company', companyRoutes)
+app.use('/api/company', allowanceTypeRoutes);
+app.use('/api/company', deductionTypeRoutes);
 
 
 

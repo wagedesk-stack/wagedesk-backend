@@ -53,6 +53,32 @@ function parseNoDefaultYes(value) {
   return value.toString().trim().toLowerCase() !== "no";
 }
 
+const checkCompanyAccess = async (companyId, userId, module, rule) => {
+  // 1️⃣ Get workspace_id of the company
+  const { data: company, error: companyError } = await supabase
+    .from("companies")
+    .select("workspace_id")
+    .eq("id", companyId)
+    .single();
+
+  if (companyError || !company) return false;
+
+  // 2️⃣ Check if user belongs to that workspace
+  const { data: workspaceUser, error: workspaceError } = await supabase
+    .from("workspace_users")
+    .select("id")
+    .eq("workspace_id", company.workspace_id)
+    .eq("user_id", userId)
+    .single();
+
+  if (workspaceError || !workspaceUser) return false;
+
+  const auth = await authorize(userId, company.workspace_id, module, rule);
+
+  if (!auth.allowed) return false;
+
+  return true;
+};
 // ----  Function to send email ----
 
 // -------------------- Employee Controllers -------------------- //
@@ -63,28 +89,15 @@ export const getEmployees = async (req, res) => {
   const userId = req.userId;
 
   try {
-    // Ensure the user owns the company
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Compnay not found." });
-    }
-
-    // 2. Authorize READ on EMPLOYEES
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_read",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to view employees",
+        error: "Unauthorized to view employees.",
       });
     }
 
