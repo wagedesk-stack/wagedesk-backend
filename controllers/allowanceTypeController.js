@@ -19,6 +19,16 @@ const checkCompanyAccess = async (companyId, userId, module, rule) => {
 
   if (workspaceError || !workspaceUser) return false;
 
+  // 3️ Check user belongs to this company
+  const { data: companyUser } = await supabase
+    .from("company_users")
+    .select("role")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!companyUser) return false;
+
   const auth = await authorize(userId, company.workspace_id, module, rule);
 
   if (!auth.allowed) return false;
@@ -46,7 +56,7 @@ export const createAllowanceType = async (req, res) => {
       companyId,
       userId,
       "PAYROLL",
-      "can_write"
+      "can_write",
     );
 
     if (!isAuthorized) {
@@ -72,7 +82,8 @@ export const createAllowanceType = async (req, res) => {
 
       if (code === "MEAL" && !is_taxable) {
         return res.status(400).json({
-          error: "Meal benefit must be taxable (first 5,000 exempt handled in payroll run).",
+          error:
+            "Meal benefit must be taxable (first 5,000 exempt handled in payroll run).",
         });
       }
     }
@@ -122,7 +133,7 @@ export const getAllowanceTypes = async (req, res) => {
       companyId,
       userId,
       "PAYROLL",
-      "can_read"
+      "can_read",
     );
 
     if (!isAuthorized) {
@@ -156,7 +167,7 @@ export const getAllowanceTypeById = async (req, res) => {
       companyId,
       userId,
       "PAYROLL",
-      "can_read"
+      "can_read",
     );
 
     if (!isAuthorized) {
@@ -201,7 +212,7 @@ export const updateAllowanceType = async (req, res) => {
       companyId,
       userId,
       "PAYROLL",
-      "can_write"
+      "can_write",
     );
 
     if (!isAuthorized) {
@@ -264,7 +275,6 @@ export const updateAllowanceType = async (req, res) => {
   }
 };
 
-
 export const deleteAllowanceType = async (req, res) => {
   const { companyId, id } = req.params;
   const userId = req.userId;
@@ -274,7 +284,7 @@ export const deleteAllowanceType = async (req, res) => {
       companyId,
       userId,
       "PAYROLL",
-      "can_delete"
+      "can_delete",
     );
 
     if (!isAuthorized) {

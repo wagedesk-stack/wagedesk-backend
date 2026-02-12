@@ -25,6 +25,7 @@ router.patch('/:companyId', verifyToken, upload.single('logo'), updateCompanyDet
 // Departments
 router.get("/:companyId/departments", verifyToken, manageDepartments.list);
 router.post("/departments", verifyToken, manageDepartments.create);
+router.patch("/departments/:id", verifyToken, manageDepartments.update)
 router.delete("/departments/:id", verifyToken, manageDepartments.delete);
 
 // Sub-Departments
@@ -49,9 +50,12 @@ router.get(
 );
 
 router.post("/sub-departments", verifyToken, manageSubDepartments.create);
+router.patch("/sub-departments/:id", verifyToken, manageSubDepartments.update);
+router.delete("/sub-departments/:id", verifyToken, manageSubDepartments.delete);
 
 // Job Titles
 router.get("/:companyId/job-titles", verifyToken, manageJobTitles.list);
 router.post("/job-titles", verifyToken, manageJobTitles.create);
-
+router.patch("/job-titles/:id", verifyToken, manageJobTitles.update); 
+router.delete("/job-titles/:id", verifyToken, manageJobTitles.delete);
 export default router;

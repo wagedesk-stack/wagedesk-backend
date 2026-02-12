@@ -53,8 +53,8 @@ function parseNoDefaultYes(value) {
   return value.toString().trim().toLowerCase() !== "no";
 }
 
-const checkCompanyAccess = async (companyId, userId, module, rule) => {
-  // 1️⃣ Get workspace_id of the company
+export const checkCompanyAccess = async (companyId, userId, module, rule) => {
+  // 1️ Get workspace_id of the company
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .select("workspace_id")
@@ -63,7 +63,7 @@ const checkCompanyAccess = async (companyId, userId, module, rule) => {
 
   if (companyError || !company) return false;
 
-  // 2️⃣ Check if user belongs to that workspace
+  // 2️ Check if user belongs to that workspace
   const { data: workspaceUser, error: workspaceError } = await supabase
     .from("workspace_users")
     .select("id")
@@ -72,6 +72,16 @@ const checkCompanyAccess = async (companyId, userId, module, rule) => {
     .single();
 
   if (workspaceError || !workspaceUser) return false;
+
+  // 3️ Check user belongs to this company
+  const { data: companyUser } = await supabase
+    .from("company_users")
+    .select("role")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!companyUser) return false;
 
   const auth = await authorize(userId, company.workspace_id, module, rule);
 
@@ -136,47 +146,21 @@ export const sendEmployeeEmail = async (req, res) => {
   const userId = req.userId;
   const { recipients, subject, body } = req.body;
 
-  console.log("Email Request Details:");
-  console.log("Company ID:", companyId);
-  console.log("User ID:", userId);
-  console.log("Recipients count:", recipients?.length);
-
   if (!recipients?.length || !subject || !body) {
     return res.status(400).json({ error: "Missing email fields" });
   }
 
   try {
     // 1 Verify company
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, business_name, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    console.log("Company Query Result:", { company, companyError });
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found" });
-    }
-
-    // 2️ Authorize
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_write",
     );
-
-    console.log("Authorization Result:", auth);
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You are not allowed to email employees", // if your authorize function returns details
-      });
-    }
-
-    if (!auth.allowed) {
-      return res.status(403).json({
-        error: "You are not allowed to email employees",
+        error: "Unauthorized to send emails.",
       });
     }
 
@@ -229,28 +213,15 @@ export const getEmployeeById = async (req, res) => {
   const userId = req.userId;
 
   try {
-    // Ensure the user owns the company
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Compnay not found." });
-    }
-
-    // 2. Authorize READ on EMPLOYEES
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_read",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to view employees",
+        error: "Unauthorized to view employee(s).",
       });
     }
 
@@ -301,27 +272,15 @@ export const addEmployee = async (req, res) => {
   }
 
   try {
-    // Ensure the user owns the company
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found." });
-    }
-
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_write",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to add employees",
+        error: "Unauthorized to Add employee(s).",
       });
     }
 
@@ -385,27 +344,15 @@ export const updateEmployee = async (req, res) => {
   }
 
   try {
-    // Verify  the company exists
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found." });
-    }
-
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_write",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to Edit employees",
+        error: "Unauthorized to Edit employee(s).",
       });
     }
 
@@ -456,26 +403,15 @@ export const deleteEmployee = async (req, res) => {
   const userId = req.userId;
 
   try {
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found." });
-    }
-
-    const auth = await authorize(
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_delete",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to delete employees",
+        error: "Unauthorized to delete employee(s).",
       });
     }
 
@@ -519,27 +455,15 @@ export const importEmployees = async (req, res) => {
   }
 
   try {
-    // Ensure the company exists
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found." });
-    }
-
-    const auth = await authorize(
+   const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
       "can_write",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to add/edit employees",
+        error: "Unauthorized to bulk import.",
       });
     }
 
@@ -987,27 +911,15 @@ export const generateEmployeeTemplate = async (req, res) => {
   const userId = req.userId;
 
   try {
-    // 1. Ensure the user owns the company
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id, workspace_id")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError || !company) {
-      return res.status(403).json({ error: "Company not found." });
-    }
-
-    const auth = await authorize(
+   const isAuthorized = await checkCompanyAccess(
+      companyId,
       userId,
-      company.workspace_id,
       "EMPLOYEES",
-      "can_write",
+      "can_read",
     );
-
-    if (!auth.allowed) {
+    if (!isAuthorized) {
       return res.status(403).json({
-        error: "You do not have permission to add/edit employees",
+        error: "Unauthorized to download template.",
       });
     }
 

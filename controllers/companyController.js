@@ -3,7 +3,7 @@ import { authorize } from "../utils/authorize.js";
 import { v4 as uuidv4 } from "uuid";
 
 const checkCompanyAccess = async (companyId, userId, module, rule) => {
-  // 1️⃣ Get workspace_id of the company
+  // 1️ Get workspace_id of the company
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .select("workspace_id")
@@ -12,15 +12,25 @@ const checkCompanyAccess = async (companyId, userId, module, rule) => {
 
   if (companyError || !company) return false;
 
-  // 2️⃣ Check if user belongs to that workspace
+  // 2️ Check if user belongs to that workspace
   const { data: workspaceUser, error: workspaceError } = await supabase
     .from("workspace_users")
     .select("id")
     .eq("workspace_id", company.workspace_id)
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
   if (workspaceError || !workspaceUser) return false;
+
+  // 3️ Check user belongs to this company
+  const { data: companyUser } = await supabase
+    .from("company_users")
+    .select("role")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!companyUser) return false;
 
   const auth = await authorize(userId, company.workspace_id, module, rule);
 
@@ -62,7 +72,6 @@ export const createCompany = async (req, res) => {
   }
 
   try {
-
     const { data: workspaceUser } = await supabase
       .from("workspace_users")
       .select("role")
@@ -124,7 +133,7 @@ export const createCompany = async (req, res) => {
       (key) => payload[key] === undefined && delete payload[key],
     );
 
-   const { data: company, error: insertError } = await supabase
+    const { data: company, error: insertError } = await supabase
       .from("companies")
       .upsert(payload, { onConflict: "id" })
       .select()
@@ -158,7 +167,7 @@ export const createCompany = async (req, res) => {
         role: companyRole,
       });
 
-       if (membershipError) throw membershipError;
+    if (membershipError) throw membershipError;
 
     res.status(201).json(data);
   } catch (error) {
@@ -289,7 +298,7 @@ export const updateCompanyDetails = async (req, res) => {
 // Get Company Settings Summary
 export const getCompanySettingsSummary = async (req, res) => {
   const { companyId } = req.params;
-   const userId = req.userId;
+  const userId = req.userId;
 
   try {
     const isAuthorized = await checkCompanyAccess(
@@ -339,6 +348,22 @@ export const getCompanySettingsSummary = async (req, res) => {
 // --- Departments ---
 export const manageDepartments = {
   list: async (req, res) => {
+    const { companyId } = req.params;
+    const userId = req.userId;
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
+      userId,
+      "ORG_SETTINGS",
+      "can_read",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to view departments.",
+      });
+    }
     const { data, error } = await supabase
       .from("departments")
       .select("*")
@@ -347,6 +372,21 @@ export const manageDepartments = {
   },
   create: async (req, res) => {
     const { company_id, name } = req.body;
+    const userId = req.userId;
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to create departments.",
+      });
+    }
 
     const { data, error } = await supabase
       .from("departments")
@@ -356,8 +396,77 @@ export const manageDepartments = {
     if (error) return res.status(400).json(error);
     res.json(data);
   },
+  update: async (req, res) => {
+    const { id } = req.params;
+    const { name } = req.body;
+    const userId = req.userId;
+
+    // First get the company_id for this department
+    const { data: department, error: deptError } = await supabase
+      .from("departments")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (deptError || !department) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      department.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to update departments.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("departments")
+      .update({ name })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json(error);
+    res.json(data);
+  },
   delete: async (req, res) => {
-    await supabase.from("departments").delete().eq("id", req.params.id);
+    const { id } = req.params;
+    const userId = req.userId;
+
+    // First get the company_id for this department
+    const { data: department, error: deptError } = await supabase
+      .from("departments")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (deptError || !department) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      department.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_delete",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to delete departments.",
+      });
+    }
+    const { error } = await supabase.from("departments").delete().eq("id", id);
+
+    if (error) return res.status(400).json(error);
     res.status(204).send();
   },
 };
@@ -365,39 +474,266 @@ export const manageDepartments = {
 // --- Sub-Departments / Projects / Sections ---
 export const manageSubDepartments = {
   list: async (req, res) => {
+    const { companyId } = req.params;
+    const userId = req.userId;
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
+      userId,
+      "ORG_SETTINGS",
+      "can_read",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to view sub-departments.",
+      });
+    }
+
     const { data, error } = await supabase
       .from("sub_departments")
       .select("*, departments(name)")
-      .eq("company_id", req.params.companyId);
+      .eq("company_id", companyId);
+
+    if (error) return res.status(400).json(error);
     res.json(data || []);
   },
   create: async (req, res) => {
+    const { company_id, department_id, name, type } = req.body;
+    const userId = req.userId;
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to create sub-departments.",
+      });
+    }
+
     const { data, error } = await supabase
       .from("sub_departments")
-      .insert([req.body])
+      .insert([{ company_id, department_id, name, type }])
       .select()
       .single();
+
     if (error) return res.status(400).json(error);
     res.json(data);
+  },
+  update: async (req, res) => {
+    const { id } = req.params;
+    const { name, type, department_id } = req.body;
+    const userId = req.userId;
+
+    // First get the company_id for this sub-department
+    const { data: subDept, error: subError } = await supabase
+      .from("sub_departments")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (subError || !subDept) {
+      return res.status(404).json({ error: "Sub-department not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      subDept.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to update sub-departments.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("sub_departments")
+      .update({ name, type, department_id })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json(error);
+    res.json(data);
+  },
+  delete: async (req, res) => {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    // First get the company_id for this sub-department
+    const { data: subDept, error: subError } = await supabase
+      .from("sub_departments")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (subError || !subDept) {
+      return res.status(404).json({ error: "Sub-department not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      subDept.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_delete",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to delete sub-departments.",
+      });
+    }
+    const { error } = await supabase
+      .from("sub_departments")
+      .delete()
+      .eq("id", id);
+
+    if (error) return res.status(400).json(error);
+    res.status(204).send();
   },
 };
 
 // --- Job Titles ---
 export const manageJobTitles = {
   list: async (req, res) => {
+    const { companyId } = req.params;
+    const userId = req.userId;
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      companyId,
+      userId,
+      "ORG_SETTINGS",
+      "can_read",
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to view job titles.",
+      });
+    }
+
     const { data, error } = await supabase
       .from("job_titles")
       .select("*")
       .eq("company_id", req.params.companyId);
+
+    if (error) return res.status(400).json(error);
     res.json(data || []);
   },
   create: async (req, res) => {
+     const { company_id, title } = req.body;
+    const userId = req.userId;
+
+     // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write"
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to create job titles.",
+      });
+    }
+
     const { data, error } = await supabase
       .from("job_titles")
-      .insert([req.body])
+      .insert([{ company_id, title }])
       .select()
       .single();
+
     if (error) return res.status(400).json(error);
     res.json(data);
+  },
+  update: async (req, res) => {
+    const { id } = req.params;
+    const { title } = req.body;
+     const userId = req.userId;
+
+     // First get the company_id for this job title
+    const { data: jobTitle, error: jobError } = await supabase
+      .from("job_titles")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (jobError || !jobTitle) {
+      return res.status(404).json({ error: "Job title not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      jobTitle.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_write"
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to update job titles.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("job_titles")
+      .update({ title })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json(error);
+    res.json(data);
+  },
+  delete: async (req, res) => {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    // First get the company_id for this job title
+    const { data: jobTitle, error: jobError } = await supabase
+      .from("job_titles")
+      .select("company_id")
+      .eq("id", id)
+      .single();
+
+    if (jobError || !jobTitle) {
+      return res.status(404).json({ error: "Job title not found" });
+    }
+
+    // Check authorization
+    const isAuthorized = await checkCompanyAccess(
+      jobTitle.company_id,
+      userId,
+      "ORG_SETTINGS",
+      "can_delete"
+    );
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Unauthorized to delete job titles.",
+      });
+    }
+
+    const { error } = await supabase
+      .from("job_titles")
+      .delete()
+      .eq("id", id);
+
+    if (error) return res.status(400).json(error);
+    res.status(204).send();
   },
 };

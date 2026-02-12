@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import workspaceRouters from './routes/workspaceRoutes.js';
-import companyRoutes from './routes/companyRoutes.js'
+import companyRoutes from './routes/companyRoutes.js';
+import companyUsersRoutes from './routes/companyUsersRoutes.js';
 import bankRoutes from './routes/bankRoutes.js';
 import employeesRoutes from './routes/employeesRoutes.js'
 import deductionTypeRoutes from './routes/deductionTypeRoutes.js';
@@ -27,7 +28,8 @@ app.use('/api', workspaceRouters)
 app.use('/api', bankRoutes)
 
 app.use('/api/company', employeesRoutes);
-app.use('/api/company', companyRoutes)
+app.use('/api/company', companyRoutes);
+app.use('/api/company', companyUsersRoutes);
 app.use('/api/company', allowanceTypeRoutes);
 app.use('/api/company', deductionTypeRoutes);
 
