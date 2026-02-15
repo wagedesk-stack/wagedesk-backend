@@ -10,6 +10,9 @@ import deductionTypeRoutes from './routes/deductionTypeRoutes.js';
 import allowanceTypeRoutes from './routes/allowanceTypeRoutes.js';
 import companyReviewersRoutes from './routes/companyReviewersRoutes.js';
 import payrollRoutes from './routes/payrollRoutes.js';
+import reportsRoutes from './routes/reportsRoutes.js';
+import payslipRoutes from './routes/payslipRoutes.js';
+import p9aRoutes from './routes/p9aRoutes.js';
 
 dotenv.config();
 
@@ -30,6 +33,9 @@ app.use('/api', workspaceRouters)
 app.use('/api', bankRoutes)
 
 app.use('/api/company/:companyId', payrollRoutes);
+app.use('/api/company/:companyId/payroll/payslip', payslipRoutes);
+app.use('/api/company/:companyId/payroll/runs', reportsRoutes);
+app.use('/api/company/:companyId/payroll/employees', p9aRoutes);
 app.use('/api/company', employeesRoutes);
 app.use('/api/company', companyRoutes);
 app.use('/api/company', companyUsersRoutes);
