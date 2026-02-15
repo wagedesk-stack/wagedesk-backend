@@ -22,8 +22,8 @@ export const generatePayslipPdf = async (req, res) => {
           id,
           employee_number,
           first_name,
-          last_name,
-          other_names,
+          middle_name,
+          last_name,      
           krapin,
           nssf_number,
           shif_number
@@ -34,7 +34,7 @@ export const generatePayslipPdf = async (req, res) => {
           company:company_id (
             id,
             business_name,
-            address,
+            location,
             company_phone,
             company_email,
             logo_url
@@ -102,9 +102,9 @@ export const emailPayslip = async (req, res) => {
           id,
           employee_number,
           first_name,
+          middle_name,
           last_name,
           email,
-          other_names,
           krapin,
           nssf_number,
           shif_number
@@ -115,7 +115,7 @@ export const emailPayslip = async (req, res) => {
           company:company_id (
             id,
             business_name,
-            address,
+            location,
             company_phone,
             company_email,
             logo_url
@@ -151,19 +151,20 @@ export const emailPayslip = async (req, res) => {
     const fileName = `Payslip_${employee.first_name}_${employee.last_name}_${payroll_run.payroll_month}_${payroll_run.payroll_year}.pdf`;
 
     // Generate email template HTML
-    const employeeFullName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+    const employeeFullName = `${employee.first_name || ''} ${employee.middle_name || ''} ${employee.last_name || ''}`.trim();
     const htmlContent = getPayslipEmailTemplate(employeeFullName, company.business_name, formattedPeriod);
 
     // Send the email with the PDF as an attachment
-    await sendEmail({
+    await sendEmailService({
       to: employee.email,
       subject: `Your Payslip for ${formattedPeriod} from ${company.business_name}`,
       html: htmlContent,
       attachments: [{
         filename: fileName,
         content: pdfBuffer,
-        contentType: 'application/pdf',
+        //contentType: 'application/pdf',
       }],
+      company: company.business_name,
     });
     
     res.status(200).json({ message: 'Payslip emailed successfully.' });

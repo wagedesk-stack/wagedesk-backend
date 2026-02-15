@@ -37,7 +37,7 @@ export const sendEmailService = async ({
       htmlContent: html,
       textContent: text,
       attachments: attachments.map((file) => ({
-        name: file.name,
+        name: file.filename || file.name,
         content:
           file.content instanceof Buffer
             ? file.content.toString("base64")
