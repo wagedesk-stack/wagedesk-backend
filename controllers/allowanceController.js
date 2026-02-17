@@ -98,7 +98,7 @@ export const assignAllowance = async (req, res) => {
 
   // 1. Auto-calculate end_date if duration is provided
   let end_date = null;
-  if (is_recurring && number_of_months && start_date) {
+  if (!is_recurring && number_of_months && start_date) {
     const start = new Date(start_date);
     start.setMonth(start.getMonth() + parseInt(number_of_months));
     end_date = start.toISOString().split('T')[0];
@@ -165,7 +165,12 @@ export const getAllowances = async (req, res) => {
     const { data, error } = await supabase
       .from("allowances")
       .select(
-        "*, allowance_types(name, is_cash, is_taxable), employees(first_name, last_name)",
+        `*, 
+        allowance_types(name, is_cash, is_taxable, code), 
+        employees(first_name, last_name, employee_number),
+        departments(name),
+        sub_departments(name),
+        job_titles(title)`,
       )
       .eq("company_id", companyId);
     if (error) throw error;
@@ -220,11 +225,21 @@ export const updateAllowance = async (req, res) => {
   } = req.body;
 
   let end_date = null;
-  if (is_recurring && number_of_months && start_date) {
+  if (!is_recurring && number_of_months && start_date) {
     const start = new Date(start_date);
     start.setMonth(start.getMonth() + parseInt(number_of_months));
     end_date = start.toISOString().split('T')[0];
   }
+
+  const payload = {
+    value,
+    calculation_type,
+    is_recurring,
+    start_date,
+    number_of_months,
+    end_date,
+    metadata
+  };
 
   try {
     const isAuthorized = await checkCompanyAccess(
@@ -241,15 +256,7 @@ export const updateAllowance = async (req, res) => {
 
     const { data, error } = await supabase
       .from("allowances")
-      .update({
-        value,
-        calculation_type,
-        is_recurring,
-        start_date,
-        number_of_months,
-        end_date,
-        metadata
-      })
+      .update(payload)
       .eq("id", id)
       .eq("company_id", companyId)
       .select()

@@ -164,7 +164,7 @@ export const getDeductions = async (req, res) => {
       .select(`
         *, 
         deduction_types(name, code, is_pre_tax), 
-        employees(first_name, last_name), 
+        employees(first_name, last_name, employee_number), 
         departments(name),
         sub_departments(name),
         job_titles(title)
@@ -223,7 +223,7 @@ export const updateDeduction = async (req, res) => {
   } = req.body;
 
   let end_date = null;
-  if (is_recurring && number_of_months && start_date) {
+  if (!is_recurring && number_of_months && start_date) {
     const start = new Date(start_date);
     start.setMonth(start.getMonth() + parseInt(number_of_months));
     end_date = start.toISOString().split('T')[0];
