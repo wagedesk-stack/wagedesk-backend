@@ -21,7 +21,7 @@ export const generateP9APdf = async (req, res) => {
           id,
           first_name,
           last_name,
-          other_names,
+          middle_name,
           krapin,
           employee_number
         ),
@@ -91,7 +91,7 @@ export const emailP9A = async (req, res) => {
                     id,
                     first_name,
                     last_name,
-                    other_names,
+                    middle_name,
                     krapin,
                     employee_number,
                     email
@@ -137,7 +137,7 @@ export const emailP9A = async (req, res) => {
         const htmlContent = getP9AEmailTemplate(employeeFullName, firstRecord.payroll_run.company.business_name, year);
     
         // Send the email with the PDF as an attachment
-        await sendEmail({
+        await sendEmailService({
             to: firstRecord.employee.email,
             subject: `Your P9A Tax Card for the year ${year} from ${firstRecord.payroll_run.company.business_name}`,
             html: htmlContent,

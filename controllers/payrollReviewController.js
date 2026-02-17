@@ -138,3 +138,89 @@ export const getPayrollReportData = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+export const getLatestPayrollOverview = async (req, res) => {
+  const { companyId } = req.params;
+
+  try {
+    // 1. Get the most recent payroll run
+    const { data: latestRun, error: runError } = await supabase
+      .from("payroll_runs")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (runError || !latestRun) {
+      return res.status(404).json({ message: "No payroll runs found for this company." });
+    }
+
+    // 2. Fetch all details for this specific run including employee department info
+    const { data: details, error: detailsError } = await supabase
+      .from("payroll_details")
+      .select(`
+        *,
+        employees (
+          departments ( name )
+        )
+      `)
+      .eq("payroll_run_id", latestRun.id);
+
+    if (detailsError) throw detailsError;
+
+    // 3. Aggregate Data for Charts
+    const deptMap = {};
+    let totalBasic = 0;
+    let totalCashAllowances = 0;
+    let totalNonCash = 0;
+    let totalDeductions = 0;
+
+    details.forEach((item) => {
+      const deptName = item.employees?.departments?.name || "Unassigned";
+      
+      // Net Pay by Department
+      deptMap[deptName] = (deptMap[deptName] || 0) + Number(item.net_pay);
+
+      // Cost Breakdown sums
+      totalBasic += Number(item.basic_salary);
+      totalCashAllowances += Number(item.total_cash_allowances);
+      totalNonCash += Number(item.total_non_cash_benefits);
+      totalDeductions += Number(item.total_other_deductions);
+    });
+
+    const response = {
+      summary: {
+        payrollId: latestRun.id,
+        payrollMonth: latestRun.payroll_month,
+        payrollYear: latestRun.payroll_year,
+        status: latestRun.status,
+        employeesPaid: details.length,
+        grossPay: latestRun.total_gross_pay,
+        netPay: latestRun.total_net_pay,
+        statutory: latestRun.total_statutory_deductions,
+      },
+      breakdown: [
+        { name: "Basic Salary", value: totalBasic },
+        { name: "Cash Allowances", value: totalCashAllowances },
+        { name: "Non-Cash Benefits", value: totalNonCash },
+        { name: "Deductions", value: totalDeductions },
+      ],
+      statutoryDetails: [
+        { name: "PAYE", value: details.reduce((sum, i) => sum + Number(i.paye_tax), 0) },
+        { name: "NSSF", value: details.reduce((sum, i) => sum + Number(i.nssf_deduction), 0) },
+        { name: "SHIF", value: details.reduce((sum, i) => sum + Number(i.shif_deduction), 0) },
+        { name: "Housing Levy", value: details.reduce((sum, i) => sum + Number(i.housing_levy_deduction), 0) },
+        { name: "HELB", value: details.reduce((sum, i) => sum + Number(i.helb_deduction), 0) },
+      ],
+      departmentalNetPay: Object.keys(deptMap).map(dept => ({
+        department: dept,
+        netPay: deptMap[dept]
+      }))
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

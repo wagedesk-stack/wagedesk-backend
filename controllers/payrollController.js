@@ -947,7 +947,8 @@ export const getPayrollReviewStatus = async (req, res) => {
     // Get all company reviewers with their details from company_users
     const { data: companyReviewers, error: reviewersError } = await supabase
       .from("company_reviewers")
-      .select(`
+      .select(
+        `
         id,
         reviewer_level,
         company_user_id,
@@ -955,7 +956,8 @@ export const getPayrollReviewStatus = async (req, res) => {
           full_name,
           email
         )
-      `)
+      `,
+      )
       .eq("company_id", companyId)
       .order("reviewer_level", { ascending: true });
 
@@ -965,7 +967,7 @@ export const getPayrollReviewStatus = async (req, res) => {
     if (!companyReviewers || companyReviewers.length === 0) {
       return res.json({
         payroll: payrollRun,
-        steps: []
+        steps: [],
       });
     }
 
@@ -977,16 +979,18 @@ export const getPayrollReviewStatus = async (req, res) => {
 
     if (detailsError) throw detailsError;
 
-    const payrollDetailIds = payrollDetails.map(d => d.id);
+    const payrollDetailIds = payrollDetails.map((d) => d.id);
     const totalItems = payrollDetailIds.length;
 
     // Get all reviews for this run
     const { data: reviews, error: reviewsError } = await supabase
       .from("payroll_reviews")
-      .select(`
+      .select(
+        `
         status,
         company_reviewer_id
-      `)
+      `,
+      )
       .in("payroll_detail_id", payrollDetailIds);
 
     if (reviewsError) throw reviewsError;
@@ -996,28 +1000,29 @@ export const getPayrollReviewStatus = async (req, res) => {
       if (!acc[review.company_reviewer_id]) {
         acc[review.company_reviewer_id] = {
           approved: 0,
-          rejected: 0
+          rejected: 0,
         };
       }
-      
-      if (review.status === 'APPROVED') {
+
+      if (review.status === "APPROVED") {
         acc[review.company_reviewer_id].approved++;
-      } else if (review.status === 'REJECTED') {
+      } else if (review.status === "REJECTED") {
         acc[review.company_reviewer_id].rejected++;
       }
-      
+
       return acc;
     }, {});
 
     // Build steps for all reviewers with actual names
-    const steps = companyReviewers.map(reviewer => {
+    const steps = companyReviewers.map((reviewer) => {
       const stats = reviewStats[reviewer.id] || { approved: 0, rejected: 0 };
-      
+
       // Use full_name from company_users, fallback to email or level
-      const reviewerName = reviewer.company_users?.full_name || 
-                          reviewer.company_users?.email?.split('@')[0] || 
-                          `Reviewer Level ${reviewer.reviewer_level}`;
-      
+      const reviewerName =
+        reviewer.company_users?.full_name ||
+        reviewer.company_users?.email?.split("@")[0] ||
+        `Reviewer Level ${reviewer.reviewer_level}`;
+
       return {
         reviewer_id: reviewer.id,
         reviewer_name: reviewerName,
@@ -1027,17 +1032,15 @@ export const getPayrollReviewStatus = async (req, res) => {
         approved_items: stats.approved,
         rejected_items: stats.rejected,
         pending_items: totalItems - stats.approved - stats.rejected,
-        completion_percentage: totalItems > 0 
-          ? Math.round((stats.approved / totalItems) * 100) 
-          : 0
+        completion_percentage:
+          totalItems > 0 ? Math.round((stats.approved / totalItems) * 100) : 0,
       };
     });
 
     res.json({
       payroll: payrollRun,
-      steps: steps
+      steps: steps,
     });
-
   } catch (error) {
     console.error("Error fetching review status:", error);
     res.status(500).json({ error: "Failed to fetch review status" });
@@ -1071,32 +1074,51 @@ export const getPayrollRun = async (req, res) => {
   const { companyId } = req.params;
 
   try {
-    const { data: payrollRun, error } = await supabase
+    const { data, error } = await supabase
       .from("payroll_runs")
-      .select(
-        `
-        *,
-        payroll_details (
-          count,
-          sum(gross_pay) as total_gross,
-          sum(net_pay) as total_net,
-          sum(paye_tax) as total_paye,
-          sum(nssf_deduction) as total_nssf,
-          sum(shif_deduction) as total_shif,
-          sum(helb_deduction) as total_helb,
-          sum(housing_levy_deduction) as total_housing_levy
-        )
-      `,
-      )
+      .select("*, payroll_details(*)")
       .eq("id", runId)
-      .eq("company_id", companyId)
       .single();
 
-    if (error) throw error;
-    if (!payrollRun) {
+      if (error) throw error;
+    if (!data) {
       return res.status(404).json({ error: "Payroll run not found." });
     }
 
+      const details = data.payroll_details || [];
+      const totals = {
+        count: details.length,
+        total_gross: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.gross_pay) || 0),
+          0,
+        ),
+        total_net: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.net_pay) || 0),
+          0,
+        ),
+        total_paye: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.paye_tax) || 0),
+          0,
+        ),
+        total_nssf: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.nssf_deduction) || 0),
+          0,
+        ),
+        total_shif: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.shif_deduction) || 0),
+          0,
+        ),
+        total_helb: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.helb_deduction) || 0),
+          0,
+        ),
+        total_housing_levy: details.reduce(
+          (acc, curr) => acc + (parseFloat(curr.housing_levy_deduction) || 0),
+          0,
+        ),
+      };
+
+    
     // Get employee count
     const { count } = await supabase
       .from("payroll_details")
@@ -1104,8 +1126,9 @@ export const getPayrollRun = async (req, res) => {
       .eq("payroll_run_id", runId);
 
     res.status(200).json({
-      ...payrollRun,
-      employee_count: count,
+      ...data,
+      employee_count: details.length,
+      calculated_totals: totals 
     });
   } catch (error) {
     console.error("Get payroll run error:", error);

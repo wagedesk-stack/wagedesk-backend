@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
 
+
 // Helper to get the directory name in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +29,8 @@ function formatCurrency(amount) {
     maximumFractionDigits: 2,
   });
 }
+
+
 
 export const generateP9APDF = (monthlyPayrollData, employee, company, year) => {
   return new Promise(async (resolve, reject) => {
@@ -88,7 +91,7 @@ export const generateP9APDF = (monthlyPayrollData, employee, company, year) => {
               },
               {
                 text: `Employee's Other Names: ${employee.first_name} ${
-                  employee.other_names || ""
+                  employee.middle_name || ""
                 }`,
                 style: "info",
               },

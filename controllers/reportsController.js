@@ -15,7 +15,7 @@ const fetchAnnualRunIds = async (companyId, year) => {
     .select("id, payroll_month")
     .eq("company_id", companyId)
     .eq("payroll_year", year)
-    .eq("status", "Completed");
+    .eq("status", "APPROVED"); // Only approved runs should be included in the annual report
 
   if (error) {
     throw new Error("Failed to fetch annual payroll runs.");
@@ -33,7 +33,7 @@ const fetchAnnualGrossPayData = async (runIds) => {
     .select(
       `
                 gross_pay,
-                employee:employee_id (employee_number, first_name, last_name, other_names),
+                employee:employee_id (employee_number, first_name, last_name, middle_name),
                 payroll_run:payroll_run_id (payroll_month)
             `
     )
@@ -56,7 +56,7 @@ const fetchPayrollData = async (companyId, runId) => {
             employee:employee_id (
                 first_name,
                 last_name,
-                other_names,
+                middle_name,
                 phone,
                 employee_number,
                 krapin,
@@ -106,7 +106,7 @@ const fetchCompanyDetails = async (companyId) => {
 
 //Get Available Years for Annual Report
 export const getAnnualReportYears = async (req, res) => {
-  console.log("DEBUG: getAnnualReportYears called with params:", req.params);
+  console.log("Debug code");
   try {
     const { companyId } = req.params;
 
@@ -121,7 +121,7 @@ export const getAnnualReportYears = async (req, res) => {
       .from("payroll_runs")
       .select("payroll_year")
       .eq("company_id", companyId)
-      .eq("status", "Completed"); // Only completed runs are useful for the annual report
+      .eq("status", "APPROVED"); // Only approved runs are useful for the annual report
 
     if (error) {
       console.error("Error fetching annual report years:", error);
@@ -144,8 +144,9 @@ export const getAnnualReportYears = async (req, res) => {
     // This resolves the 500 error caused by the frontend expecting the wrong format.
     res.status(200).json(uniqueYears);
   } catch (error) {
+    console.log("Debug code");
     console.error("getAnnualReportYears error:", error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message && "Internal server error while fetching available years." });
   }
 };
 
@@ -168,7 +169,7 @@ export const generateAnnualGrossEarningsReport = async (req, res) => {
     // 1. Fetch Company Info (for header)
     const { data: companyData } = await supabase
       .from("companies")
-      .select("business_name, address, company_phone, company_email, logo_url")
+      .select("business_name, location, company_phone, company_email, logo_url")
       .eq("id", companyId)
       .single();
 
@@ -205,7 +206,7 @@ export const generateAnnualGrossEarningsReport = async (req, res) => {
       const empId = record.employee.employee_number;
       const fullName = `${record.employee.first_name} ${
         record.employee.last_name
-      } ${record.employee.other_names || ""}`.trim();
+      } ${record.employee.middle_name || ""}`.trim();
       if (!employeeMap[empId]) {
         employeeMap[empId] = {
           "EMP. CODE": empId,
@@ -672,7 +673,7 @@ const generateKraSecB1 = (data) => {
     return [
       record.employee.krapin || "",
       `${record.employee.first_name || ""} ${
-        record.employee.other_names || ""
+        record.employee.middle_name || ""
       } ${record.employee.last_name || ""}`.trim(),
       residentStatus || "Resident",
       record.employee.employee_type || "Primary Employee",
@@ -739,7 +740,7 @@ const generateNssfReturn = async (data) => {
       record.employee.employee_number,
       record.employee.last_name,
       `${record.employee.first_name} ${
-        record.employee.other_names || ""
+        record.employee.middle_name || ""
       }`.trim(),
       record.employee.id_number,
       record.employee.krapin,
@@ -805,7 +806,7 @@ const generateHousingLevyReturn = (data) => {
 
   const records = data.map((record) => [
     record.employee.id_number || "",
-    `${record.employee.first_name || ""} ${record.employee.other_names || ""} ${
+    `${record.employee.first_name || ""} ${record.employee.middle_name || ""} ${
       record.employee.last_name || ""
     }`.trim(),
     record.employee.krapin || "",
@@ -838,7 +839,7 @@ const generateHelbReport = async (data) => {
     if (parseFloat(record.helb_deduction) > 0) {
       worksheet.addRow([
         record.employee.id_number,
-        `${record.employee.first_name} ${record.employee.other_names || ""} ${
+        `${record.employee.first_name} ${record.employee.middle_name || ""} ${
           record.employee.last_name
         }`.trim(),
         record.employee.employee_number,
@@ -863,7 +864,7 @@ const generateBankPaymentFile = (data) => {
   const records = data
     .filter((r) => r.payment_method?.toLowerCase() === "bank")
     .map((record) => [
-      `${record.employee.first_name} ${record.employee.other_names || ""} ${
+      `${record.employee.first_name} ${record.employee.middle_name || ""} ${
         record.employee.last_name
       }`.trim(),
       record.account_name,
@@ -902,10 +903,10 @@ const generateMpesaPaymentFile = (data) => {
   const records = data
     .filter((r) => r.payment_method?.toLowerCase() === "m-pesa")
     .map((record) => [
-      `${record.employee.first_name} ${record.employee.other_names || ""} ${
+      `${record.employee.first_name} ${record.employee.middle_name || ""} ${
         record.employee.last_name
       }`.trim(),
-      record.mpesa_phone,
+      record.mobile_phone,
       formatCurrency(record.net_pay),
       `Payroll Ref ${record.payroll_run.payroll_number}`,
     ]);
@@ -949,7 +950,7 @@ const generateCashPaymentSheet = async (data) => {
         .filter((r) => r.payment_method?.toLowerCase() === "cash")
         .map((record, index) => [
           (index + 1).toString(),
-          `${record.employee.first_name} ${record.employee.other_names || ""} ${
+          `${record.employee.first_name} ${record.employee.middle_name || ""} ${
             record.employee.last_name
           }`.trim(),
           record.employee.id_number,
@@ -1185,7 +1186,7 @@ const generateGenericExcelReport = async (data, reportType, companyDetails) => {
           row.push(
             `${record.employee?.first_name || ""} ${
               record.employee?.last_name || ""
-            } ${record.employee?.other_names || ""}`
+            } ${record.employee?.middle_name || ""}`
           );
         } else if (totalsMapping[header]) {
           row.push(parseFloat(record[totalsMapping[header]] || 0));
