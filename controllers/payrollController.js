@@ -27,6 +27,34 @@ const MEAL_EXEMPTION_LIMIT = 5000;
 const getMonthEndDate = (month, year) => {
   return new Date(year, monthNames.indexOf(month) + 1, 0);
 };
+// Helper to compare month/year with payroll period
+const isInPayrollPeriod = (
+  startMonth,
+  startYear,
+  endMonth,
+  endYear,
+  targetMonth,
+  targetYear,
+) => {
+  const targetMonthIndex = monthNames.indexOf(targetMonth);
+  const startMonthIndex = monthNames.indexOf(startMonth);
+
+  // Convert to comparable numbers (year * 12 + month index)
+  const targetValue = targetYear * 12 + targetMonthIndex;
+  const startValue = startYear * 12 + startMonthIndex;
+
+  // Check if target is after or equal to start
+  if (targetValue < startValue) return false;
+
+  // If no end date (recurring), it's valid
+  if (!endMonth || !endYear) return true;
+
+  const endMonthIndex = monthNames.indexOf(endMonth);
+  const endValue = endYear * 12 + endMonthIndex;
+
+  // Check if target is before or equal to end
+  return targetValue <= endValue;
+};
 
 // Helper to check if employee was active during payroll period
 const isEmployeeActiveDuringPeriod = (employee, payrollMonth, payrollYear) => {
@@ -210,6 +238,17 @@ export const syncPayroll = async (req, res) => {
     return res.status(400).json({ error: "Month and year are required." });
   }
 
+  // Validate month
+  if (!monthNames.includes(payrollMonth)) {
+    return res.status(400).json({ 
+      error: `Invalid month. Must be one of: ${monthNames.join(', ')}` 
+    });
+  }
+
+  // Start a transaction
+  const { data: transaction, error: txError } =
+    await supabase.rpc("begin_transaction");
+
   try {
     // 1. Check for existing payroll run
     const { data: existingRun } = await supabase
@@ -257,6 +296,35 @@ export const syncPayroll = async (req, res) => {
 
       if (createError) throw createError;
       payrollRunId = newRunId;
+    }
+
+    // 3. Delete existing records in correct order
+    if (!isNewRun) {
+      // First, get all payroll details for this run
+      const { data: existingDetails } = await supabase
+        .from("payroll_details")
+        .select("id")
+        .eq("payroll_run_id", payrollRunId);
+
+      if (existingDetails && existingDetails.length > 0) {
+        const detailIds = existingDetails.map((d) => d.id);
+
+        // Delete reviews first (due to foreign key)
+        const { error: deleteReviewsError } = await supabase
+          .from("payroll_reviews")
+          .delete()
+          .in("payroll_detail_id", detailIds);
+
+        if (deleteReviewsError) throw deleteReviewsError;
+
+        // Then delete payroll details
+        const { error: deleteDetailsError } = await supabase
+          .from("payroll_details")
+          .delete()
+          .eq("payroll_run_id", payrollRunId);
+
+        if (deleteDetailsError) throw deleteDetailsError;
+      }
     }
 
     // 3. Fetch employees with all necessary relations
@@ -309,11 +377,12 @@ export const syncPayroll = async (req, res) => {
     }
 
     // 5. Fetch allowances and deductions with their types
-    const [allowancesResult, deductionsResult] = await Promise.all([
-      supabase
-        .from("allowances")
-        .select(
-          `
+    const [allowancesResult, deductionsResult, absentDaysResult] =
+      await Promise.all([
+        supabase
+          .from("allowances")
+          .select(
+            `
           *,
           allowance_types!inner (
             code,
@@ -324,23 +393,14 @@ export const syncPayroll = async (req, res) => {
             maximum_value
           )
         `,
-        )
-        .eq("company_id", companyId)
-        .eq("is_recurring", true)
-        .or(
-          `end_date.is.null,end_date.gte.${getMonthEndDate(payrollMonth, payrollYear).toISOString().split("T")[0]}`,
-        )
-        .lte(
-          "start_date",
-          getMonthEndDate(payrollMonth, payrollYear)
-            .toISOString()
-            .split("T")[0],
-        ),
+          )
+          .eq("company_id", companyId)
+          .or(`is_recurring.eq.true,is_recurring.eq.false`),
 
-      supabase
-        .from("deductions")
-        .select(
-          `
+        supabase
+          .from("deductions")
+          .select(
+            `
           *,
           deduction_types!inner (
             code,
@@ -350,49 +410,55 @@ export const syncPayroll = async (req, res) => {
             maximum_value
           )
         `,
-        )
-        .eq("company_id", companyId)
-        .eq("is_recurring", true)
-        .or(
-          `end_date.is.null,end_date.gte.${getMonthEndDate(payrollMonth, payrollYear).toISOString().split("T")[0]}`,
-        )
-        .lte(
-          "start_date",
-          getMonthEndDate(payrollMonth, payrollYear)
-            .toISOString()
-            .split("T")[0],
-        ),
-    ]);
+          )
+          .eq("company_id", companyId)
+          .or(`is_recurring.eq.true,is_recurring.eq.false`),
+
+        supabase
+          .from("employee_absent_days")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("month", monthNames.indexOf(payrollMonth) + 1) // Convert month name to number
+          .eq("year", payrollYear),
+      ]);
 
     if (allowancesResult.error) throw new Error("Failed to fetch allowances.");
     if (deductionsResult.error) throw new Error("Failed to fetch deductions.");
+    if (absentDaysResult.error) throw new Error("Failed to fetch absent days.");
 
-    const allAllowances = allowancesResult.data;
-    const allDeductions = deductionsResult.data;
+     // Filter allowances and deductions in memory based on month/year
+    const allAllowances = allowancesResult.data.filter(allowance => 
+      isInPayrollPeriod(
+        allowance.start_month,
+        allowance.start_year,
+        allowance.end_month,
+        allowance.end_year,
+        payrollMonth,
+        payrollYear
+      )
+    );
 
-    // 6. Delete existing payroll details if any (for sync operation)
-    if (!isNewRun) {
-      await supabase
-        .from("payroll_details")
-        .delete()
-        .eq("payroll_run_id", payrollRunId);
-    }
-    // NEW: Also delete existing reviews for this run before recreating details
-    if (!isNewRun) {
-      // We join through payroll_details to find reviews associated with this run
-      const { data: oldDetails } = await supabase
-        .from("payroll_details")
-        .select("id")
-        .eq("payroll_run_id", payrollRunId);
+    const allDeductions = deductionsResult.data.filter(deduction => 
+      isInPayrollPeriod(
+        deduction.start_month,
+        deduction.start_year,
+        deduction.end_month,
+        deduction.end_year,
+        payrollMonth,
+        payrollYear
+      )
+    );
+    const absentDaysRecords = absentDaysResult.data || [];
 
-      if (oldDetails?.length > 0) {
-        const detailIds = oldDetails.map((d) => d.id);
-        await supabase
-          .from("payroll_reviews")
-          .delete()
-          .in("payroll_detail_id", detailIds);
-      }
-    }
+    // Create a map of absent days for quick lookup
+    const absentDaysMap = new Map();
+    absentDaysRecords.forEach((record) => {
+      absentDaysMap.set(record.employee_id, {
+        days: record.absent_days,
+        amount: record.total_deduction_amount,
+        notes: record.notes,
+      });
+    });
 
     // 7. Calculate payroll for each employee
     const payrollDetailsToInsert = [];
@@ -414,6 +480,18 @@ export const syncPayroll = async (req, res) => {
 
       // Basic salary
       let basicSalary = parseFloat(employee.salary);
+
+      // Check for absent days
+      let absentDaysDeduction = 0;
+      let absentDaysCount = 0;
+      const absentRecord = absentDaysMap.get(employee.id);
+      if (absentRecord) {
+        absentDaysCount = absentRecord.days;
+        absentDaysDeduction = absentRecord.amount;
+
+        // Adjust basic salary before statutory calculations
+        basicSalary = basicSalary - absentDaysDeduction;
+      }
 
       // Cash allowances and non-cash benefits
       let cashAllowances = 0;
@@ -590,18 +668,23 @@ export const syncPayroll = async (req, res) => {
         const deductionCode = deduction.deduction_types.code;
         const isPreTax = deduction.deduction_types.is_pre_tax;
 
-        // Track insurance premium for relief calculation
+        // Track insurance premium for relief (from any insurance-related deductions)
         if (
+          deductionCode === "INS" ||
           deductionCode === "PRMF" ||
           deduction.deduction_types.name.toLowerCase().includes("insurance")
         ) {
           insurancePremium += deductionValue;
         }
 
-        if (isPreTax) {
-          preTaxDeductions += deductionValue;
-        } else {
-          postTaxDeductions += deductionValue;
+        // For actual deductions (not just relief tracking)
+        if (deductionCode !== "INS") {
+          // Exclude INS from actual deductions if it's just for relief
+          if (isPreTax) {
+            preTaxDeductions += deductionValue;
+          } else {
+            postTaxDeductions += deductionValue;
+          }
         }
 
         deductionsDetails.push({
@@ -609,6 +692,7 @@ export const syncPayroll = async (req, res) => {
           name: deduction.deduction_types.name,
           value: deductionValue,
           is_pre_tax: isPreTax,
+          is_insurance_relief: deductionCode === "INS",
         });
       }
 
@@ -642,6 +726,7 @@ export const syncPayroll = async (req, res) => {
         insurancePremium * 0.15,
         INSURANCE_RELIEF_CAP,
       );
+      insuranceRelief = Math.round(insuranceRelief);
       payeTax = Math.max(0, payeTax - insuranceRelief);
 
       // Calculate total deductions and net pay
@@ -658,7 +743,7 @@ export const syncPayroll = async (req, res) => {
         id: uuidv4(),
         payroll_run_id: payrollRunId,
         employee_id: employee.id,
-        basic_salary: basicSalary,
+        basic_salary: parseFloat(employee.salary),
         total_cash_allowances: cashAllowances,
         total_non_cash_benefits: nonCashTaxableBenefits,
         total_allowances: cashAllowances + nonCashTaxableBenefits,
@@ -687,6 +772,8 @@ export const syncPayroll = async (req, res) => {
         allowances_details: allowancesDetails,
         deductions_details: deductionsDetails,
         insurance_relief: insuranceRelief,
+        absent_days: absentDaysCount,
+        absent_days_deduction: absentDaysDeduction,
         created_at: new Date().toISOString(),
       });
 
@@ -724,10 +811,13 @@ export const syncPayroll = async (req, res) => {
 
     if (updateError) throw updateError;
 
-    // 10. NEW: Initialize the review pipeline
-    // This ensures that even in DRAFT mode, the "Review Status" page can show
-    // who needs to approve what once the process starts.
-    await initializePayrollReviews(payrollRunId, companyId);
+    // 8. Initialize reviews (make sure this doesn't duplicate)
+    if (isNewRun) {
+      await initializePayrollReviews(payrollRunId, companyId);
+    }
+
+    // Commit transaction
+    await supabase.rpc("commit_transaction");
 
     // 10. Return response
     res.status(200).json({
@@ -739,6 +829,7 @@ export const syncPayroll = async (req, res) => {
       totals,
     });
   } catch (error) {
+    await supabase.rpc("rollback_transaction");
     console.error("Payroll sync error:", error);
     res.status(500).json({
       error: "Failed to sync payroll.",
@@ -1118,6 +1209,73 @@ export const updateItemReviewStatus = async (req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: "Update failed" });
+  }
+};
+
+// backend/controllers/payrollController.js
+
+// Add this new function for bulk review updates
+export const bulkUpdateReviewStatus = async (req, res) => {
+  const { companyId } = req.params;
+  const { reviewIds, status } = req.body; // status: 'APPROVED', 'REJECTED', or 'PENDING'
+
+  if (!reviewIds || !Array.isArray(reviewIds) || reviewIds.length === 0) {
+    return res.status(400).json({ error: "Review IDs array is required" });
+  }
+
+  if (!status || !['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
+    return res.status(400).json({ error: "Valid status is required" });
+  }
+
+  try {
+    // First, verify that all reviews belong to this company
+    // This is an extra security check to prevent updating reviews from other companies
+    const { data: reviews, error: fetchError } = await supabase
+      .from("payroll_reviews")
+      .select(`
+        id,
+        payroll_detail_id,
+        payroll_details!inner (
+          payroll_run_id,
+          payroll_runs!inner (
+            company_id
+          )
+        )
+      `)
+      .in("id", reviewIds);
+
+    if (fetchError) throw fetchError;
+
+    // Check if all reviews belong to the company
+    const invalidReviews = reviews.filter(
+      review => review.payroll_details?.payroll_runs?.company_id !== companyId
+    );
+
+    if (invalidReviews.length > 0) {
+      return res.status(403).json({ 
+        error: "Some reviews do not belong to this company" 
+      });
+    }
+
+    // Perform bulk update
+    const { data, error } = await supabase
+      .from("payroll_reviews")
+      .update({
+        status,
+        reviewed_at: status === "PENDING" ? null : new Date().toISOString(),
+      })
+      .in("id", reviewIds)
+      .select();
+
+    if (error) throw error;
+
+    res.json({
+      message: `Successfully updated ${data.length} review(s)`,
+      updated: data
+    });
+  } catch (error) {
+    console.error("Bulk update error:", error);
+    res.status(500).json({ error: "Bulk update failed" });
   }
 };
 

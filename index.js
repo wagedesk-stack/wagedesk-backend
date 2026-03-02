@@ -11,6 +11,7 @@ import helbRoutes from './routes/helbRoutes.js';
 import deductionRoutes from './routes/deductionRoutes.js';
 import deductionTypeRoutes from './routes/deductionTypeRoutes.js';
 import allowanceTypeRoutes from './routes/allowanceTypeRoutes.js';
+import absentDaysRoutes from './routes/absentDaysRoutes.js';
 import companyReviewersRoutes from './routes/companyReviewersRoutes.js';
 import payrollRoutes from './routes/payrollRoutes.js';
 import reportsRoutes from './routes/reportsRoutes.js';
@@ -48,6 +49,7 @@ app.use('/api/company', allowanceTypeRoutes);
 app.use('/api/company', allowanceRoutes);
 app.use('/api/company', deductionTypeRoutes);
 app.use('/api/company', deductionRoutes);
+app.use('/api/company', absentDaysRoutes);
 app.use('/api/company', companyReviewersRoutes);
 app.use('/api/company', auditRoutes);
 

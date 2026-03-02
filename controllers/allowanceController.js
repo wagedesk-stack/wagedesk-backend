@@ -1,12 +1,33 @@
+// backend/controllers/allowanceController.js
 import supabase from "../libs/supabaseClient.js";
 import ExcelJS from "exceljs";
 import pkg from "xlsx";
 import { authorize } from "../utils/authorize.js";
-const { utils, read, SSF } = pkg;
+const { utils, read } = pkg;
 
+// Month name constants for validation
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+const monthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 // -------------------- Helper Functions -------------------- //
 
-// Helper function to check for company ownershi
+// Helper function to check for company access
 export const checkCompanyAccess = async (companyId, userId, module, rule) => {
   // 1️ Get workspace_id of the company
   const { data: company, error: companyError } = await supabase
@@ -44,119 +65,24 @@ export const checkCompanyAccess = async (companyId, userId, module, rule) => {
   return true;
 };
 
-// Helper function to parse Excel dates and various date formats
-function parseExcelDate(dateValue) {
-  if (!dateValue && dateValue !== 0) return null;
+// Helper to validate month name
+const isValidMonth = (month) => {
+  return MONTHS.includes(month);
+};
+
+// Helper to calculate end month/year from start and duration
+const calculateEndPeriod = (startMonth, startYear, numberOfMonths) => {
+  const startMonthIndex = monthNames.indexOf(startMonth);
+  // For 1 month, end should be same as start
+  // For 2+ months, calculate properly
+  const totalMonths = startMonthIndex + (numberOfMonths - 1); // Subtract 1 to make it inclusive
   
-  // If it's an Excel serial number (number)
-  if (typeof dateValue === 'number') {
-    try {
-      // Excel dates start from 1900-01-01
-      // Excel incorrectly treats 1900 as a leap year, so we need to adjust
-      const excelEpoch = new Date(1900, 0, 1);
-      const days = dateValue - 1; // Subtract 1 because Excel starts at 1
-      
-      // Adjust for Excel's leap year bug (day 60 is 1900-02-29, which doesn't exist)
-      const adjustedDays = days > 59 ? days - 1 : days;
-      
-      const result = new Date(excelEpoch.getTime() + adjustedDays * 24 * 60 * 60 * 1000);
-      
-      // Check if date is valid
-      if (isNaN(result.getTime())) {
-        return null;
-      }
-      
-      // Return in YYYY-MM-DD format
-      return result.toISOString().split('T')[0];
-    } catch (e) {
-      console.error("Error parsing Excel date:", e);
-      return null;
-    }
-  }
+  const endYear = startYear + Math.floor(totalMonths / 12);
+  const endMonthIndex = totalMonths % 12;
+  const endMonth = monthNames[endMonthIndex];
   
-  // If it's a string
-  if (typeof dateValue === 'string') {
-    const str = dateValue.trim();
-    
-    // Check for YYYY-MM-DD format
-    const yyyyMmDdRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (yyyyMmDdRegex.test(str)) {
-      return str;
-    }
-    
-    // Check for DD/MM/YYYY or MM/DD/YYYY
-    const slashRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-    const slashMatch = str.match(slashRegex);
-    if (slashMatch) {
-      // Assume DD/MM/YYYY (common in many regions)
-      const day = parseInt(slashMatch[1], 10);
-      const month = parseInt(slashMatch[2], 10);
-      const year = parseInt(slashMatch[3], 10);
-      
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        const date = new Date(year, month - 1, day);
-        if (!isNaN(date.getTime())) {
-          return date.toISOString().split('T')[0];
-        }
-      }
-    }
-    
-    // Check for DD-MM-YYYY
-    const dashRegex = /^(\d{1,2})-(\d{1,2})-(\d{4})$/;
-    const dashMatch = str.match(dashRegex);
-    if (dashMatch) {
-      const day = parseInt(dashMatch[1], 10);
-      const month = parseInt(dashMatch[2], 10);
-      const year = parseInt(dashMatch[3], 10);
-      
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        const date = new Date(year, month - 1, day);
-        if (!isNaN(date.getTime())) {
-          return date.toISOString().split('T')[0];
-        }
-      }
-    }
-    
-    // Try native Date parsing as last resort
-    const date = new Date(str);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString().split('T')[0];
-    }
-  }
-  
-  return null;
-}
-
-// Parse and validate date string (must be YYYY-MM-DD)
-function parseDate(dateStr, row, fieldName, errors) {
-  if (!dateStr) return null;
-
-  // Accept string or Excel date serial number
-  if (typeof dateStr === "number") {
-    // Excel serial number -> JS Date
-    const parsedDate = SSF.parse_date_code(dateStr);
-    if (!parsedDate) {
-      errors.push(`Row ${row}: Invalid date format for ${fieldName}.`);
-      return null;
-    }
-    const jsDate = new Date(parsedDate.y, parsedDate.m - 1, parsedDate.d);
-    return jsDate.toISOString().split("T")[0];
-  }
-
-  if (typeof dateStr === "string") {
-    const regex = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
-    if (!regex.test(dateStr)) {
-      errors.push(
-        `Row ${row}: Invalid date format for ${fieldName}. Use YYYY-MM-DD.`,
-      );
-      return null;
-    }
-    return new Date(dateStr).toISOString().split("T")[0];
-  }
-
-  errors.push(`Row ${row}: Could not parse date for ${fieldName}.`);
-  return null;
-}
+  return { endMonth, endYear };
+};
 
 // -------------------- Controller Functions -------------------- //
 
@@ -174,17 +100,30 @@ export const assignAllowance = async (req, res) => {
     value,
     calculation_type,
     is_recurring,
-    start_date,
+    start_month,
+    start_year,
     number_of_months,
     metadata = {},
   } = req.body;
 
-  // 1. Auto-calculate end_date if duration is provided
-  let end_date = null;
-  if (!is_recurring && number_of_months && start_date) {
-    const start = new Date(start_date);
-    start.setMonth(start.getMonth() + parseInt(number_of_months));
-    end_date = start.toISOString().split('T')[0];
+  // Validate month
+  if (!isValidMonth(start_month)) {
+    return res.status(400).json({ 
+      error: `Invalid start_month. Must be one of: ${MONTHS.join(', ')}` 
+    });
+  }
+
+  // Calculate end month/year if non-recurring with duration
+  let end_month = null;
+  let end_year = null;
+  if (!is_recurring && number_of_months && start_month && start_year) {
+    const { endMonth, endYear } = calculateEndPeriod(
+      start_month, 
+      parseInt(start_year), 
+      parseInt(number_of_months)
+    );
+    end_month = endMonth;
+    end_year = endYear;
   }
 
   const payload = {
@@ -194,9 +133,11 @@ export const assignAllowance = async (req, res) => {
     value,
     calculation_type,
     is_recurring,
-    start_date,
+    start_month,
+    start_year,
     number_of_months,
-    end_date,
+    end_month,
+    end_year,
     metadata,
     // Clear other IDs based on applies_to to ensure data integrity
     employee_id: applies_to === 'INDIVIDUAL' ? employee_id : null,
@@ -218,11 +159,22 @@ export const assignAllowance = async (req, res) => {
       });
     }
 
-    const { data, error } = await supabase.from("allowances").insert([payload]).select();
+    const { data, error } = await supabase
+      .from("allowances")
+      .insert([payload])
+      .select(`
+        *,
+        allowance_types(name, is_cash, is_taxable, code),
+        employees(first_name, last_name, employee_number),
+        departments(name),
+        sub_departments(name),
+        job_titles(title)
+      `);
 
     if (error) throw error;
-    res.status(201).json(data);
+    res.status(201).json(data[0]);
   } catch (err) {
+    console.error("Assign allowance error:", err);
     res.status(500).json({ error: "Failed to assign allowance" });
   }
 };
@@ -247,18 +199,21 @@ export const getAllowances = async (req, res) => {
 
     const { data, error } = await supabase
       .from("allowances")
-      .select(
-        `*, 
+      .select(`
+        *, 
         allowance_types(name, is_cash, is_taxable, code), 
-        employees(first_name, last_name, employee_number),
+        employees(first_name, middle_name, last_name, employee_number),
         departments(name),
         sub_departments(name),
-        job_titles(title)`,
-      )
-      .eq("company_id", companyId);
+        job_titles(title)
+      `)
+      .eq("company_id", companyId)
+      .order('created_at', { ascending: false });
+
     if (error) throw error;
     res.json(data);
   } catch (err) {
+    console.error("Get allowances error:", err);
     res.status(500).json({ error: "Failed to fetch allowances" });
   }
 };
@@ -283,13 +238,22 @@ export const getAllowanceById = async (req, res) => {
 
     const { data, error } = await supabase
       .from("allowances")
-      .select("*")
+      .select(`
+        *,
+        allowance_types(name, is_cash, is_taxable, code),
+        employees(first_name, last_name, employee_number),
+        departments(name),
+        sub_departments(name),
+        job_titles(title)
+      `)
       .eq("id", id)
       .eq("company_id", companyId)
       .single();
+
     if (error) throw error;
     res.json(data);
   } catch (err) {
+    console.error("Get allowance by id error:", err);
     res.status(404).json({ error: "Allowance not found" });
   }
 };
@@ -302,26 +266,42 @@ export const updateAllowance = async (req, res) => {
     value,
     calculation_type,
     is_recurring,
-    start_date,
+    start_month,
+    start_year,
     number_of_months,
     metadata,
   } = req.body;
 
-  let end_date = null;
-  if (!is_recurring && number_of_months && start_date) {
-    const start = new Date(start_date);
-    start.setMonth(start.getMonth() + parseInt(number_of_months));
-    end_date = start.toISOString().split('T')[0];
+  // Validate month if provided
+  if (start_month && !isValidMonth(start_month)) {
+    return res.status(400).json({ 
+      error: `Invalid start_month. Must be one of: ${MONTHS.join(', ')}` 
+    });
+  }
+
+  // Calculate end month/year if non-recurring with duration
+  let end_month = null;
+  let end_year = null;
+  if (!is_recurring && number_of_months && start_month && start_year) {
+    const { endMonth, endYear } = calculateEndPeriod(
+      start_month, 
+      parseInt(start_year), 
+      parseInt(number_of_months)
+    );
+    end_month = endMonth;
+    end_year = endYear;
   }
 
   const payload = {
     value,
     calculation_type,
     is_recurring,
-    start_date,
+    start_month,
+    start_year,
     number_of_months,
-    end_date,
-    metadata
+    end_month,
+    end_year,
+    metadata,
   };
 
   try {
@@ -342,12 +322,20 @@ export const updateAllowance = async (req, res) => {
       .update(payload)
       .eq("id", id)
       .eq("company_id", companyId)
-      .select()
+      .select(`
+        *,
+        allowance_types(name, is_cash, is_taxable, code),
+        employees(first_name, last_name, employee_number),
+        departments(name),
+        sub_departments(name),
+        job_titles(title)
+      `)
       .single();
 
     if (error) throw error;
     res.json(data);
   } catch (err) {
+    console.error("Update allowance error:", err);
     res.status(500).json({ error: "Failed to update allowance" });
   }
 };
@@ -375,27 +363,23 @@ export const removeAllowance = async (req, res) => {
       .delete()
       .eq("id", id)
       .eq("company_id", companyId);
+
     if (error) throw error;
-    res.json({ message: "Allowance removed" });
+    res.json({ message: "Allowance removed successfully" });
   } catch (err) {
+    console.error("Remove allowance error:", err);
     res.status(500).json({ error: "Failed to remove allowance" });
   }
 };
 
-//bulk delete
+// BULK DELETE
 export const bulkDeleteAllowances = async (req, res) => {
   const { companyId } = req.params;
-  const { allowanceIds } = req.body; // Expecting an array of allowance IDs
+  const { allowanceIds } = req.body;
   const userId = req.userId;
 
-  if (
-    !allowanceIds ||
-    !Array.isArray(allowanceIds) ||
-    allowanceIds.length === 0
-  ) {
-    return res
-      .status(400)
-      .json({ error: "No allowance IDs provided for deletion." });
+  if (!allowanceIds || !Array.isArray(allowanceIds) || allowanceIds.length === 0) {
+    return res.status(400).json({ error: "No allowance IDs provided for deletion." });
   }
 
   try {
@@ -416,21 +400,18 @@ export const bulkDeleteAllowances = async (req, res) => {
       .delete()
       .in("id", allowanceIds)
       .eq("company_id", companyId);
+
     if (error) {
       console.error("Bulk delete allowances error:", error);
       return res.status(500).json({ error: "Failed to remove allowances" });
     }
 
-    res
-      .status(200)
-      .json({
-        message: `${allowanceIds.length} allowance(s) deleted successfully.`,
-      });
+    res.status(200).json({
+      message: `${allowanceIds.length} allowance(s) deleted successfully.`,
+    });
   } catch (err) {
     console.error("Bulk delete allowances controller error:", err);
-    res
-      .status(500)
-      .json({ error: "An unexpected error occurred during bulk deletion." });
+    res.status(500).json({ error: "An unexpected error occurred during bulk deletion." });
   }
 };
 
@@ -503,8 +484,9 @@ export const generateAllowanceTemplate = async (req, res) => {
       { header: "Value", key: "value", width: 15 },
       { header: "Calc Type", key: "calc_type", width: 15 },
       { header: "Is Recurring", key: "recurring", width: 15 },
-      { header: "Start Date (YYYY-MM-DD)", key: "start", width: 20 },
-      { header: "Months (Optional)", key: "months", width: 15 },
+      { header: "Start Month", key: "start_month", width: 15 },
+      { header: "Start Year", key: "start_year", width: 12 },
+      { header: "Duration (Months)", key: "duration", width: 15 },
       { header: "Metadata JSON", key: "metadata", width: 40 },
     ];
 
@@ -526,8 +508,9 @@ export const generateAllowanceTemplate = async (req, res) => {
       "EMP001", 
       "5000", 
       "FIXED", 
-      "TRUE", 
-      "2024-01-01", 
+      "FALSE", 
+      "January", 
+      "2024", 
       "12", 
       '{"notes": "Monthly housing allowance"}'
     ]);
@@ -584,6 +567,14 @@ export const generateAllowanceTemplate = async (req, res) => {
       refSheet.getCell(`H${index + 3}`).value = job.title;
     });
 
+    // Add Months reference
+    refSheet.getCell('J1').value = 'MONTHS';
+    refSheet.getCell('J2').value = 'Valid Months';
+    
+    MONTHS.forEach((month, index) => {
+      refSheet.getCell(`J${index + 3}`).value = month;
+    });
+
     // Style reference sheet columns
     refSheet.columns = [
       { width: 20 }, // A: Employee Number
@@ -594,6 +585,8 @@ export const generateAllowanceTemplate = async (req, res) => {
       { width: 25 }, // F: Sub-Department Name
       { width: 5 },  // G: Spacer
       { width: 25 }, // H: Job Title
+      { width: 5 },  // I: Spacer
+      { width: 20 }, // J: Months
     ];
 
     // Protect reference sheet
@@ -618,9 +611,6 @@ export const generateAllowanceTemplate = async (req, res) => {
     const departmentList = departments.map(d => d.name);
     const subDepartmentList = subDepartments.map(s => s.name);
     const jobTitleList = jobTitles.map(j => j.title);
-
-    // For ExcelJS, we need to create named ranges or use direct lists
-    // Since ExcelJS has limitations with dynamic named ranges, we'll use direct lists
     
     for (let i = 2; i <= 1000; i++) {
       // Allowance Type dropdown
@@ -668,25 +658,18 @@ export const generateAllowanceTemplate = async (req, res) => {
         errorTitle: 'Invalid Value',
         error: 'Please select TRUE or FALSE'
       };
-    }
 
-    // Add conditional formatting to highlight required fields
-    mainSheet.addConditionalFormatting({
-      ref: 'A2:G1000',
-      rules: [
-        {
-          type: 'expression',
-          formulae: ['=AND(A2<>"",B2<>"",C2<>"",D2<>"",E2<>"",F2<>"",G2<>"")'],
-          style: {
-            fill: {
-              type: 'pattern',
-              pattern: 'solid',
-              bgColor: { argb: 'FFC6EFCE' }
-            }
-          }
-        }
-      ]
-    });
+      // Start Month dropdown
+      mainSheet.getCell(`G${i}`).dataValidation = {
+        type: 'list',
+        allowBlank: false,
+        formulae: [`"${MONTHS.join(',')}"`],
+        showErrorMessage: true,
+        errorStyle: 'stop',
+        errorTitle: 'Invalid Month',
+        error: `Please select a valid month from the list`
+      };
+    }
 
     // Add notes sheet
     const notesSheet = workbook.addWorksheet("Instructions");
@@ -697,28 +680,25 @@ export const generateAllowanceTemplate = async (req, res) => {
     notesSheet.getCell('A4').value = '2. Use the "Reference (Read Only)" sheet to see available employees, departments, etc.';
     notesSheet.getCell('A5').value = '3. Column explanations:';
     notesSheet.getCell('A6').value = '   - Allowance Type Name: Select from dropdown (based on your configured allowance types)';
-    notesSheet.getCell('A7').value = '   - Applies To: Select who this allowance applies to (INDIVIDUAL, COMPANY, DEPARTMENT, SUB_DEPARTMENT, JOB_TITLE)';
+    notesSheet.getCell('A7').value = '   - Applies To: Select who this allowance applies to';
     notesSheet.getCell('A8').value = '   - Target Identifier: Based on Applies To selection:';
-    notesSheet.getCell('A9').value = '     * For INDIVIDUAL: Use Employee Number (see Reference sheet)';
-    notesSheet.getCell('A10').value = '     * For DEPARTMENT: Use Department Name (see Reference sheet)';
-    notesSheet.getCell('A11').value = '     * For SUB_DEPARTMENT: Use Sub-Department Name (see Reference sheet)';
-    notesSheet.getCell('A12').value = '     * For JOB_TITLE: Use Job Title (see Reference sheet)';
-    notesSheet.getCell('A13').value = '     * For COMPANY: Leave blank or enter "COMPANY"';
+    notesSheet.getCell('A9').value = '     * INDIVIDUAL: Employee Number (see Reference sheet)';
+    notesSheet.getCell('A10').value = '     * DEPARTMENT: Department Name (see Reference sheet)';
+    notesSheet.getCell('A11').value = '     * SUB_DEPARTMENT: Sub-Department Name (see Reference sheet)';
+    notesSheet.getCell('A12').value = '     * JOB_TITLE: Job Title (see Reference sheet)';
+    notesSheet.getCell('A13').value = '     * COMPANY: Leave blank or enter "COMPANY"';
     notesSheet.getCell('A14').value = '   - Value: Numeric value for the allowance';
-    notesSheet.getCell('A15').value = '   - Calc Type: FIXED (fixed amount) or PERCENTAGE (percentage of basic salary)';
-    notesSheet.getCell('A16').value = '   - Is Recurring: TRUE (repeats monthly) or FALSE (one-time)';
-    notesSheet.getCell('A17').value = '   - Start Date: Format YYYY-MM-DD (e.g., 2024-01-01)';
-    notesSheet.getCell('A18').value = '   - Months: For non-recurring allowances, number of months (optional)';
-    notesSheet.getCell('A19').value = '   - Metadata: JSON format for additional data (optional)';
+    notesSheet.getCell('A15').value = '   - Calc Type: FIXED or PERCENTAGE';
+    notesSheet.getCell('A16').value = '   - Is Recurring: TRUE (repeats) or FALSE (one-time)';
+    notesSheet.getCell('A17').value = '   - Start Month: Select from dropdown (January-December)';
+    notesSheet.getCell('A18').value = '   - Start Year: 4-digit year (e.g., 2024)';
+    notesSheet.getCell('A19').value = '   - Duration: For non-recurring, number of months (optional)';
+    notesSheet.getCell('A20').value = '   - Metadata: JSON format for additional data (optional)';
     
-    notesSheet.getCell('A21').value = '4. All fields except Months and Metadata are required';
-    notesSheet.getCell('A22').value = '5. Rows with green background have all required fields filled';
+    notesSheet.getCell('A22').value = '4. All fields except Duration and Metadata are required';
     
     // Style notes sheet
     notesSheet.columns = [{ width: 80 }];
-    for (let i = 3; i <= 22; i++) {
-      notesSheet.getCell(`A${i}`).font = { size: 11 };
-    }
 
     // Set response headers
     res.setHeader(
@@ -737,6 +717,7 @@ export const generateAllowanceTemplate = async (req, res) => {
     res.status(500).json({ error: "Failed to generate allowance template." });
   }
 };
+
 // BULK IMPORT ALLOWANCES
 export const importAllowances = async (req, res) => {
   const { companyId } = req.params;
@@ -762,7 +743,7 @@ export const importAllowances = async (req, res) => {
 
     const workbook = read(file.buffer, { type: "buffer" });
     
-    // Get the main sheet (Allowances) - we ignore reference sheets
+    // Get the main sheet (Allowances)
     const mainSheetName = workbook.SheetNames.find(name => 
       name === "Allowances" || name.includes("Allowance")
     );
@@ -778,8 +759,8 @@ export const importAllowances = async (req, res) => {
     // Use sheet_to_json with header option to get proper parsing
     const jsonData = utils.sheet_to_json(worksheet, { 
       header: 1,
-      defval: '', // Default value for empty cells
-      blankrows: false // Skip completely empty rows
+      defval: '',
+      blankrows: false
     });
 
     // Filter out empty rows and header row
@@ -800,7 +781,6 @@ export const importAllowances = async (req, res) => {
       supabase.from("allowance_types").select("id, name, code").eq("company_id", companyId)
     ]);
 
-    // Check for errors
     if (employees.error || depts.error || subs.error || titles.error || types.error) {
       throw new Error("Failed to fetch reference data");
     }
@@ -815,7 +795,7 @@ export const importAllowances = async (req, res) => {
     const errors = [];
 
     for (const [index, row] of dataRows.entries()) {
-      const rowNumber = index + 2; // Account for header row
+      const rowNumber = index + 2;
       
       const typeName = row[0]?.toString().trim();
       const appliesTo = row[1]?.toString().trim().toUpperCase();
@@ -823,9 +803,10 @@ export const importAllowances = async (req, res) => {
       const value = row[3];
       const calculationType = row[4]?.toString().trim().toUpperCase();
       const isRecurring = row[5]?.toString().trim().toUpperCase();
-      const startDate = row[6]; // Can be string or number (Excel serial)
-      const numberOfMonths = row[7] ? parseInt(row[7].toString().trim()) : null;
-      const metadataStr = row[8]?.toString().trim();
+      const startMonth = row[6]?.toString().trim();
+      const startYear = row[7] ? parseInt(row[7].toString().trim()) : null;
+      const numberOfMonths = row[8] ? parseInt(row[8].toString().trim()) : null;
+      const metadataStr = row[9]?.toString().trim();
 
       // Skip empty rows
       if (!typeName && !appliesTo && !target && !value) {
@@ -840,7 +821,8 @@ export const importAllowances = async (req, res) => {
       if (!value) missingFields.push("Value");
       if (!calculationType) missingFields.push("Calc Type");
       if (!isRecurring) missingFields.push("Is Recurring");
-      if (!startDate && startDate !== 0) missingFields.push("Start Date");
+      if (!startMonth) missingFields.push("Start Month");
+      if (!startYear) missingFields.push("Start Year");
 
       if (missingFields.length > 0) {
         errors.push(`Row ${rowNumber}: Missing required fields: ${missingFields.join(', ')}`);
@@ -851,6 +833,18 @@ export const importAllowances = async (req, res) => {
       const validAppliesTo = ["INDIVIDUAL", "COMPANY", "DEPARTMENT", "SUB_DEPARTMENT", "JOB_TITLE"];
       if (!validAppliesTo.includes(appliesTo)) {
         errors.push(`Row ${rowNumber}: Invalid Applies To value "${appliesTo}". Must be one of: ${validAppliesTo.join(', ')}`);
+        continue;
+      }
+
+      // Validate month
+      if (!isValidMonth(startMonth)) {
+        errors.push(`Row ${rowNumber}: Invalid month "${startMonth}". Must be one of: ${MONTHS.join(', ')}`);
+        continue;
+      }
+
+      // Validate year
+      if (isNaN(startYear) || startYear < 1900 || startYear > 2100) {
+        errors.push(`Row ${rowNumber}: Invalid year "${startYear}". Must be a valid 4-digit year.`);
         continue;
       }
 
@@ -898,9 +892,9 @@ export const importAllowances = async (req, res) => {
       // Validate is_recurring
       let recurringBool;
       const recurringStr = String(isRecurring).toUpperCase();
-      if (recurringStr === "TRUE" || recurringStr === "YES" || recurringStr === "1" || recurringStr === "TRUE") {
+      if (recurringStr === "TRUE" || recurringStr === "YES" || recurringStr === "1") {
         recurringBool = true;
-      } else if (recurringStr === "FALSE" || recurringStr === "NO" || recurringStr === "0" || recurringStr === "FALSE") {
+      } else if (recurringStr === "FALSE" || recurringStr === "NO" || recurringStr === "0") {
         recurringBool = false;
       } else {
         errors.push(`Row ${rowNumber}: Is Recurring must be TRUE or FALSE, got "${isRecurring}"`);
@@ -914,22 +908,9 @@ export const importAllowances = async (req, res) => {
         continue;
       }
 
-      // Parse date (handle both string and Excel serial number)
-      let parsedDate = null;
-      try {
-        parsedDate = parseExcelDate(startDate);
-        if (!parsedDate) {
-          errors.push(`Row ${rowNumber}: Could not parse date "${startDate}". Please use YYYY-MM-DD format or a valid Excel date.`);
-          continue;
-        }
-      } catch (dateError) {
-        errors.push(`Row ${rowNumber}: Invalid date format for Start Date. Got "${startDate}"`);
-        continue;
-      }
-
       // Validate months if provided
       if (numberOfMonths !== null && (isNaN(numberOfMonths) || numberOfMonths < 1)) {
-        errors.push(`Row ${rowNumber}: Months must be a positive number, got "${numberOfMonths}"`);
+        errors.push(`Row ${rowNumber}: Duration must be a positive number, got "${numberOfMonths}"`);
         continue;
       }
 
@@ -944,12 +925,17 @@ export const importAllowances = async (req, res) => {
         }
       }
 
-      // Calculate end_date if applicable
-      let endDate = null;
-      if (!recurringBool && numberOfMonths && parsedDate) {
-        const start = new Date(parsedDate);
-        start.setMonth(start.getMonth() + numberOfMonths);
-        endDate = start.toISOString().split('T')[0];
+      // Calculate end month/year if applicable
+      let endMonth = null;
+      let endYear = null;
+      if (!recurringBool && numberOfMonths) {
+        const { endMonth: eMonth, endYear: eYear } = calculateEndPeriod(
+          startMonth, 
+          startYear, 
+          numberOfMonths
+        );
+        endMonth = eMonth;
+        endYear = eYear;
       }
 
       // Prepare the insert object
@@ -964,9 +950,11 @@ export const importAllowances = async (req, res) => {
         value: numericValue,
         calculation_type: calculationType,
         is_recurring: recurringBool,
-        start_date: parsedDate,
+        start_month: startMonth,
+        start_year: startYear,
         number_of_months: numberOfMonths,
-        end_date: endDate,
+        end_month: endMonth,
+        end_year: endYear,
         metadata: metadata
       });
     }

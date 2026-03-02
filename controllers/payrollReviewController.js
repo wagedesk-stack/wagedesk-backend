@@ -3,7 +3,7 @@ import supabase from "../libs/supabaseClient.js";
 export const getPayrollReportData = async (req, res) => {
   const { companyId, runId } = req.params;
   const userId = req.userId;
-  const { view } = req.query; 
+  const { view } = req.query;
   try {
     // 1. Get the reviewer's ID for this company based on the logged-in user
     const { data: reviewer } = await supabase
@@ -51,8 +51,8 @@ export const getPayrollReportData = async (req, res) => {
 
     // PROFESSIONAL UX: Identify top 4 allowance names across all employees
     const allowanceCounts = {};
-    details.forEach(detail => {
-      detail.allowances_details?.forEach(allow => {
+    details.forEach((detail) => {
+      detail.allowances_details?.forEach((allow) => {
         allowanceCounts[allow.name] = (allowanceCounts[allow.name] || 0) + 1;
       });
     });
@@ -69,17 +69,19 @@ export const getPayrollReportData = async (req, res) => {
       .eq("company_id", companyId);
 
     const reports = details.map((item) => {
-        // Find the specific review entry for the current reviewer
-      const myReview = item.payroll_reviews?.find(r => r.company_reviewer_id === reviewer?.id);
+      // Find the specific review entry for the current reviewer
+      const myReview = item.payroll_reviews?.find(
+        (r) => r.company_reviewer_id === reviewer?.id,
+      );
       const emp = item.employees;
       const fullName = `${emp.first_name} ${emp.middle_name || ""} ${emp.last_name}`;
       let topAllowances = {};
       let othersSum = 0;
 
       // Initialize top columns with 0
-      topAllowanceNames.forEach(name => topAllowances[name] = 0);
+      topAllowanceNames.forEach((name) => (topAllowances[name] = 0));
 
-      item.allowances_details?.forEach(allow => {
+      item.allowances_details?.forEach((allow) => {
         if (topAllowanceNames.includes(allow.name)) {
           topAllowances[allow.name] = allow.value;
         } else if (allow.is_cash) {
@@ -104,12 +106,14 @@ export const getPayrollReportData = async (req, res) => {
         // Shared Fields
         id: item.id,
         reviewId: myReview?.id, // Essential for the update call
-        myStatus: myReview?.status || 'PENDING',
+        myStatus: myReview?.status || "PENDING",
         employeeId: emp.id,
         fullName,
         jobTitle: emp.job_titles?.title,
         department: emp.departments?.name,
         basicSalary: item.basic_salary,
+        absent_days: item.absent_days || 0,
+        absent_days_deduction: item.absent_days_deduction || 0,
         grossPay: item.gross_pay,
         netPay: item.net_pay,
 
@@ -129,7 +133,7 @@ export const getPayrollReportData = async (req, res) => {
         otherAllowances: item.allowances_details
           ?.filter((a) => a.type !== "CASH")
           .reduce((sum, a) => sum + a.value, 0),
-          topAllowances, // Specific columns
+        topAllowances, // Specific columns
         otherCashAllowances: othersSum,
         // Deductions Specific
         employmentType: emp.employee_type,
@@ -161,19 +165,19 @@ export const getPayrollReportData = async (req, res) => {
       };
     });
 
-   // Check if this is an earnings-specific request (you can add a query param)
-// Add this line at the beginning of your function
+    // Check if this is an earnings-specific request (you can add a query param)
+    // Add this line at the beginning of your function
 
-if (view === 'earnings') {
-  // Return with dynamic columns for earnings view
-  res.json({ 
-    data: reports, 
-    columns: topAllowanceNames 
-  });
-} else {
-  // Return just the array for other views
-  res.json(reports);
-}
+    if (view === "earnings") {
+      // Return with dynamic columns for earnings view
+      res.json({
+        data: reports,
+        columns: topAllowanceNames,
+      });
+    } else {
+      // Return just the array for other views
+      res.json(reports);
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -193,18 +197,22 @@ export const getLatestPayrollOverview = async (req, res) => {
       .single();
 
     if (runError || !latestRun) {
-      return res.status(404).json({ message: "No payroll runs found for this company." });
+      return res
+        .status(404)
+        .json({ message: "No payroll runs found for this company." });
     }
 
     // 2. Fetch all details for this specific run including employee department info
     const { data: details, error: detailsError } = await supabase
       .from("payroll_details")
-      .select(`
+      .select(
+        `
         *,
         employees (
           departments ( name )
         )
-      `)
+      `,
+      )
       .eq("payroll_run_id", latestRun.id);
 
     if (detailsError) throw detailsError;
@@ -218,7 +226,7 @@ export const getLatestPayrollOverview = async (req, res) => {
 
     details.forEach((item) => {
       const deptName = item.employees?.departments?.name || "Unassigned";
-      
+
       // Net Pay by Department
       deptMap[deptName] = (deptMap[deptName] || 0) + Number(item.net_pay);
 
@@ -247,16 +255,34 @@ export const getLatestPayrollOverview = async (req, res) => {
         { name: "Deductions", value: totalDeductions },
       ],
       statutoryDetails: [
-        { name: "PAYE", value: details.reduce((sum, i) => sum + Number(i.paye_tax), 0) },
-        { name: "NSSF", value: details.reduce((sum, i) => sum + Number(i.nssf_deduction), 0) },
-        { name: "SHIF", value: details.reduce((sum, i) => sum + Number(i.shif_deduction), 0) },
-        { name: "Housing Levy", value: details.reduce((sum, i) => sum + Number(i.housing_levy_deduction), 0) },
-        { name: "HELB", value: details.reduce((sum, i) => sum + Number(i.helb_deduction), 0) },
+        {
+          name: "PAYE",
+          value: details.reduce((sum, i) => sum + Number(i.paye_tax), 0),
+        },
+        {
+          name: "NSSF",
+          value: details.reduce((sum, i) => sum + Number(i.nssf_deduction), 0),
+        },
+        {
+          name: "SHIF",
+          value: details.reduce((sum, i) => sum + Number(i.shif_deduction), 0),
+        },
+        {
+          name: "Housing Levy",
+          value: details.reduce(
+            (sum, i) => sum + Number(i.housing_levy_deduction),
+            0,
+          ),
+        },
+        {
+          name: "HELB",
+          value: details.reduce((sum, i) => sum + Number(i.helb_deduction), 0),
+        },
       ],
-      departmentalNetPay: Object.keys(deptMap).map(dept => ({
+      departmentalNetPay: Object.keys(deptMap).map((dept) => ({
         department: dept,
-        netPay: deptMap[dept]
-      }))
+        netPay: deptMap[dept],
+      })),
     };
 
     res.status(200).json(response);
