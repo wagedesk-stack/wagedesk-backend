@@ -171,7 +171,7 @@ export const sendEmployeeEmail = async (req, res) => {
       .eq("id", companyId)
       .single();
 
-    if (companyError || !company) {
+      if (companyError || !company) {
       return res.status(403).json({ error: "Company not found" });
     }
 
@@ -206,9 +206,10 @@ export const sendEmployeeEmail = async (req, res) => {
       //messageId: result.id
     });
   } catch (emailError) {
-    console.error("Send email error:", emailError.message);
-    res.status(500).json({ error: "Failed to send emails" });
-  }
+  console.error("Send email error:", emailError.message);
+  res.status(500).json({ error: "Failed to send emails" });
+}
+
 };
 // Get a single employee by ID
 export const getEmployeeById = async (req, res) => {
@@ -290,6 +291,7 @@ export const addEmployee = async (req, res) => {
       });
     }
 
+
     // Get company user ID for history tracking
     const companyUser = await getCurrentCompanyUser(userId, companyId);
 
@@ -317,8 +319,7 @@ export const addEmployee = async (req, res) => {
       .insert({
         employee_id: newEmployee.id,
         salary: cleanEmployeeData.salary,
-        effective_date:
-          cleanEmployeeData.hire_date || new Date().toISOString().split("T")[0],
+        effective_date: cleanEmployeeData.hire_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
         reason: "Initial salary setup",
         notes: "Employee created",
@@ -328,16 +329,13 @@ export const addEmployee = async (req, res) => {
       console.error("Failed to create salary history:", salaryHistoryError);
     }
 
-    // Track initial status in history
+     // Track initial status in history
     const { error: statusHistoryError } = await supabase
       .from("employee_status_history")
       .insert({
         employee_id: newEmployee.id,
         status: cleanEmployeeData.employee_status || "ACTIVE",
-        effective_date:
-          cleanEmployeeData.employee_status_effective_date ||
-          employeeData.hire_date ||
-          new Date().toISOString().split("T")[0],
+        effective_date: cleanEmployeeData.employee_status_effective_date || employeeData.hire_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
         reason: "Initial status setup",
         notes: "Employee created",
@@ -355,7 +353,7 @@ export const addEmployee = async (req, res) => {
       });
     }
 
-    // Insert Contract Details and track in history
+     // Insert Contract Details and track in history
     if (contract_details) {
       const { data: newContract, error: contractError } = await supabase
         .from("employee_contracts")
@@ -381,7 +379,7 @@ export const addEmployee = async (req, res) => {
       }
     }
 
-    // Create audit log
+     // Create audit log
     await createAuditLog({
       entityType: "employees",
       entityId: newEmployee.id,
@@ -437,8 +435,7 @@ export const addSalaryChange = async (req, res) => {
       .insert({
         employee_id: employeeId,
         salary,
-        effective_date:
-          effective_date || new Date().toISOString().split("T")[0],
+        effective_date: effective_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
         reason: reason || "Manual salary update",
         notes,
@@ -484,9 +481,9 @@ export const addStatusChange = async (req, res) => {
     // Update employee's current status
     const { data: updatedEmployee, error: updateError } = await supabase
       .from("employees")
-      .update({
+      .update({ 
         employee_status: status,
-        employee_status_effective_date: effective_date,
+        employee_status_effective_date: effective_date 
       })
       .eq("id", employeeId)
       .select()
@@ -500,8 +497,7 @@ export const addStatusChange = async (req, res) => {
       .insert({
         employee_id: employeeId,
         status,
-        effective_date:
-          effective_date || new Date().toISOString().split("T")[0],
+        effective_date: effective_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
         reason: reason || "Manual status update",
         notes,
@@ -548,6 +544,16 @@ export const updateEmployee = async (req, res) => {
       });
     }
 
+     // Validate ALL UUID fields - convert empty strings to null
+    const sanitizedEmployeeData = {
+      ...employeeData,
+      department_id: employeeData.department_id === "" ? null : employeeData.department_id,
+      sub_department_id: employeeData.sub_department_id === "" ? null : employeeData.sub_department_id,
+      job_title_id: employeeData.job_title_id === "" ? null : employeeData.job_title_id,
+      reports_to: employeeData.reports_to === "" ? null : employeeData.reports_to,
+      // Add any other UUID fields that might exist
+    };
+
     // Get current employee data for comparison and audit
     const { data: currentEmployee, error: fetchError } = await supabase
       .from("employees")
@@ -564,37 +570,33 @@ export const updateEmployee = async (req, res) => {
     const companyUser = await getCurrentCompanyUser(userId, companyId);
 
     // Check if salary changed
-    if (currentEmployee.salary !== employeeData.salary) {
+    if (currentEmployee.salary !== sanitizedEmployeeData.salary) {
       await supabase.from("employee_salary_history").insert({
         employee_id: employeeId,
-        salary: employeeData.salary,
-        effective_date:
-          employeeData.salary_effective_date ||
-          new Date().toISOString().split("T")[0],
+        salary: sanitizedEmployeeData.salary,
+        effective_date: sanitizedEmployeeData.salary_effective_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
-        reason: employeeData.salary_change_reason || "Salary update",
-        notes: employeeData.salary_change_notes || null,
+        reason: sanitizedEmployeeData.salary_change_reason || "Salary update",
+        notes: sanitizedEmployeeData.salary_change_notes || null,
       });
     }
 
     // Check if status changed
-    if (currentEmployee.employee_status !== employeeData.employee_status) {
+    if (currentEmployee.employee_status !== sanitizedEmployeeData.employee_status) {
       await supabase.from("employee_status_history").insert({
         employee_id: employeeId,
-        status: employeeData.employee_status,
-        effective_date:
-          employeeData.employee_status_effective_date ||
-          new Date().toISOString().split("T")[0],
+        status: sanitizedEmployeeData.employee_status,
+        effective_date: sanitizedEmployeeData.employee_status_effective_date || new Date().toISOString().split('T')[0],
         changed_by: companyUser.id,
-        reason: employeeData.status_change_reason || "Status change",
-        notes: employeeData.status_change_notes || null,
+        reason: sanitizedEmployeeData.status_change_reason || "Status change",
+        notes: sanitizedEmployeeData.status_change_notes || null,
       });
     }
 
     // Update the employee
     const { data: updatedEmployee, error: updateError } = await supabase
       .from("employees")
-      .update(employeeData)
+      .update(sanitizedEmployeeData)
       .eq("id", employeeId)
       .eq("company_id", companyId)
       .select()
@@ -620,7 +622,7 @@ export const updateEmployee = async (req, res) => {
       newData: updatedEmployee,
     });
 
-    res.status(200).json(updatedEmployee);
+     res.status(200).json(updatedEmployee);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -644,8 +646,7 @@ export const getEmployeeSalaryHistory = async (req, res) => {
 
     const { data, error } = await supabase
       .from("employee_salary_history")
-      .select(
-        `
+      .select(`
         *,
          changed_by_user:company_users!changed_by (
           id,
@@ -653,18 +654,17 @@ export const getEmployeeSalaryHistory = async (req, res) => {
           email,
           user_id
         )
-      `,
-      )
+      `)
       .eq("employee_id", employeeId)
       .order("effective_date", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) throw error;
 
-    // Transform to ensure consistent structure
-    const transformedData = data.map((item) => ({
+     // Transform to ensure consistent structure
+    const transformedData = data.map(item => ({
       ...item,
-      changed_by_user: item.changed_by_user || null,
+      changed_by_user: item.changed_by_user || null
     }));
 
     res.status(200).json(transformedData);
@@ -691,8 +691,7 @@ export const getEmployeeStatusHistory = async (req, res) => {
 
     const { data, error } = await supabase
       .from("employee_status_history")
-      .select(
-        `
+      .select(`
         *,
         changed_by_user:company_users!changed_by (
           id,
@@ -700,18 +699,17 @@ export const getEmployeeStatusHistory = async (req, res) => {
           email,
           user_id
         )
-      `,
-      )
+      `)
       .eq("employee_id", employeeId)
       .order("effective_date", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) throw error;
 
-    // Transform to ensure consistent structure
-    const transformedData = data.map((item) => ({
+   // Transform to ensure consistent structure
+    const transformedData = data.map(item => ({
       ...item,
-      changed_by_user: item.changed_by_user || null,
+      changed_by_user: item.changed_by_user || null
     }));
 
     res.status(200).json(transformedData);
@@ -738,8 +736,7 @@ export const getEmployeeContractHistory = async (req, res) => {
 
     const { data, error } = await supabase
       .from("employee_contract_history")
-      .select(
-        `
+      .select(`
         *,
         changed_by_user:company_users!changed_by (
           id,
@@ -747,17 +744,16 @@ export const getEmployeeContractHistory = async (req, res) => {
           email,
           user_id
         )
-      `,
-      )
+      `)
       .eq("employee_id", employeeId)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
 
     // Transform to ensure consistent structure
-    const transformedData = data.map((item) => ({
+    const transformedData = data.map(item => ({
       ...item,
-      changed_by_user: item.changed_by_user || null,
+      changed_by_user: item.changed_by_user || null
     }));
 
     res.status(200).json(transformedData);
@@ -765,6 +761,7 @@ export const getEmployeeContractHistory = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // backend/controllers/employeeController.js
 
@@ -774,12 +771,7 @@ export const updateSectionEmployee = async (req, res) => {
   const updateData = req.body;
 
   try {
-    const isAuthorized = await checkCompanyAccess(
-      companyId,
-      userId,
-      "EMPLOYEES",
-      "can_write",
-    );
+    const isAuthorized = await checkCompanyAccess(companyId, userId, "EMPLOYEES", "can_write");
     if (!isAuthorized) return res.status(403).json({ error: "Unauthorized." });
 
     // 1. Update main Employee table
@@ -807,15 +799,12 @@ export const updateSectionEmployee = async (req, res) => {
     if (updateData.bank_details) {
       const { error: payError } = await supabase
         .from("employee_payment_details")
-        .upsert(
-          {
-            employee_id: employeeId,
-            ...updateData.bank_details,
-            updated_at: new Date(),
-          },
-          { onConflict: "employee_id" },
-        );
-
+        .upsert({
+          employee_id: employeeId,
+          ...updateData.bank_details,
+          updated_at: new Date()
+        }, { onConflict: 'employee_id' });
+      
       if (payError) throw payError;
     }
 
@@ -826,7 +815,7 @@ export const updateSectionEmployee = async (req, res) => {
         .update(updateData.contract_details)
         .eq("employee_id", employeeId)
         .eq("contract_status", "ACTIVE");
-
+      
       if (conError) throw conError;
     }
 
@@ -844,12 +833,7 @@ export const updatePaymentDetails = async (req, res) => {
   const paymentData = req.body;
 
   try {
-    const isAuthorized = await checkCompanyAccess(
-      companyId,
-      userId,
-      "EMPLOYEES",
-      "can_write",
-    );
+    const isAuthorized = await checkCompanyAccess(companyId, userId, "EMPLOYEES", "can_write");
     if (!isAuthorized) return res.status(403).json({ error: "Unauthorized." });
 
     const { data, error } = await supabase
@@ -875,12 +859,7 @@ export const createPaymentDetails = async (req, res) => {
   const paymentData = req.body;
 
   try {
-    const isAuthorized = await checkCompanyAccess(
-      companyId,
-      userId,
-      "EMPLOYEES",
-      "can_write",
-    );
+    const isAuthorized = await checkCompanyAccess(companyId, userId, "EMPLOYEES", "can_write");
     if (!isAuthorized) return res.status(403).json({ error: "Unauthorized." });
 
     const { data, error } = await supabase
@@ -911,12 +890,7 @@ export const updateContract = async (req, res) => {
       .eq("id", employeeId)
       .single();
 
-    const isAuthorized = await checkCompanyAccess(
-      employee.company_id,
-      userId,
-      "EMPLOYEES",
-      "can_write",
-    );
+    const isAuthorized = await checkCompanyAccess(employee.company_id, userId, "EMPLOYEES", "can_write");
     if (!isAuthorized) return res.status(403).json({ error: "Unauthorized." });
 
     const { data, error } = await supabase
@@ -934,6 +908,7 @@ export const updateContract = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 // Delete an employee
 export const deleteEmployee = async (req, res) => {
@@ -993,7 +968,7 @@ export const importEmployees = async (req, res) => {
   }
 
   try {
-    const isAuthorized = await checkCompanyAccess(
+   const isAuthorized = await checkCompanyAccess(
       companyId,
       userId,
       "EMPLOYEES",
@@ -1217,7 +1192,7 @@ export const importEmployees = async (req, res) => {
           employeeData.job_type?.toLowerCase(),
         )
           ? employeeData.job_type
-          : "Full-time",
+          : null,
         employee_status: [
           "active",
           "on leave",
@@ -1355,6 +1330,7 @@ export const importEmployees = async (req, res) => {
     const salaryHistoryRecords = [];
     const statusHistoryRecords = [];
     const contractHistoryRecords = [];
+    
 
     insertedEmployees.forEach((emp) => {
       const originalData = employeesToInsert.find(
@@ -1362,12 +1338,11 @@ export const importEmployees = async (req, res) => {
       );
 
       if (originalData) {
-        // Salary history
+         // Salary history
         salaryHistoryRecords.push({
           employee_id: emp.id,
           salary: emp.salary,
-          effective_date:
-            emp.hire_date || new Date().toISOString().split("T")[0],
+          effective_date: emp.hire_date || new Date().toISOString().split('T')[0],
           changed_by: companyUser.id,
           reason: "Bulk import - initial salary",
         });
@@ -1376,8 +1351,7 @@ export const importEmployees = async (req, res) => {
         statusHistoryRecords.push({
           employee_id: emp.id,
           status: emp.employee_status || "ACTIVE",
-          effective_date:
-            emp.hire_date || new Date().toISOString().split("T")[0],
+          effective_date: emp.hire_date || new Date().toISOString().split('T')[0],
           changed_by: companyUser.id,
           reason: "Bulk import - initial status",
         });
@@ -1407,35 +1381,26 @@ export const importEmployees = async (req, res) => {
       }
     });
 
-    // Insert all history records
+     // Insert all history records
     if (salaryHistoryRecords.length > 0) {
-      await supabase
-        .from("employee_salary_history")
-        .insert(salaryHistoryRecords);
+      await supabase.from("employee_salary_history").insert(salaryHistoryRecords);
     }
-
+    
     if (statusHistoryRecords.length > 0) {
-      await supabase
-        .from("employee_status_history")
-        .insert(statusHistoryRecords);
+      await supabase.from("employee_status_history").insert(statusHistoryRecords);
     }
-
+    
     if (contractHistoryRecords.length > 0) {
-      await supabase
-        .from("employee_contract_history")
-        .insert(contractHistoryRecords);
+      await supabase.from("employee_contract_history").insert(contractHistoryRecords);
     }
 
-    // Create audit log for bulk import
+     // Create audit log for bulk import
     await createAuditLog({
       entityType: "employees",
-      entityId: "00000000-0000-0000-0000-000000000000", // or you could create individual logs for each employee
+      entityId: "BULK_IMPORT", // or you could create individual logs for each employee
       action: "CREATE",
       performedBy: userId,
-      newData: {
-        import_label: "BULK_IMPORT", // Move the label here
-        count: insertedEmployees.length,
-      },
+      newData: { count: insertedEmployees.length },
     });
 
     // 2. Upsert Payment Details
@@ -1521,7 +1486,7 @@ export const generateEmployeeTemplate = async (req, res) => {
   const userId = req.userId;
 
   try {
-    const isAuthorized = await checkCompanyAccess(
+   const isAuthorized = await checkCompanyAccess(
       companyId,
       userId,
       "EMPLOYEES",
@@ -1614,7 +1579,7 @@ export const generateEmployeeTemplate = async (req, res) => {
       "Sub Department": subDepartments.map((d) => d.name),
       "Job Title": jobTitles.map((t) => t.title),
       "Job Type": ["Full-time", "Part-time", "Contract", "Internship"],
-      "Employee Status": ["ACTIVE", "ON LEAVE", "TERMINATED", "SUSPENDED"],
+      "Employee Status": ["ACTIVE", "On Leave", "Terminated", "Suspended"],
       "ID Type": ["National ID", "Passport"],
       Citizenship: ["Kenyan", "Non-Kenyan"],
       "Has Disability": ["Yes", "No"],

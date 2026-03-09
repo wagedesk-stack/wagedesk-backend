@@ -23,14 +23,14 @@ const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
     }
 
     if (totalReviewers === 0) {
-      // No reviewers means auto-approved? Or return empty? 
+      // No reviewers means auto-approved? Or return empty?
       // Let's return all data if no reviewers configured
       return payrollData;
     }
 
     // Get all payroll_detail_ids from the payrollData
-    const payrollDetailIds = payrollData.map(item => item.id);
-    
+    const payrollDetailIds = payrollData.map((item) => item.id);
+
     if (payrollDetailIds.length === 0) return payrollData;
 
     // Get all reviews for these payroll details
@@ -46,7 +46,7 @@ const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
 
     // Group reviews by payroll_detail_id
     const reviewsByDetail = {};
-    reviews.forEach(review => {
+    reviews.forEach((review) => {
       if (!reviewsByDetail[review.payroll_detail_id]) {
         reviewsByDetail[review.payroll_detail_id] = [];
       }
@@ -54,22 +54,26 @@ const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
     });
 
     // Filter payroll data to only include fully approved employees
-    const approvedData = payrollData.filter(detail => {
+    const approvedData = payrollData.filter((detail) => {
       const detailReviews = reviewsByDetail[detail.id] || [];
-      
+
       // If no reviews for this detail, it's not approved
       if (detailReviews.length === 0) return false;
-      
+
       // Check if all reviews are APPROVED
-      const allApproved = detailReviews.every(status => status === "APPROVED");
-      
+      const allApproved = detailReviews.every(
+        (status) => status === "APPROVED",
+      );
+
       // Check if we have reviews from all reviewers
       const hasAllReviews = detailReviews.length >= totalReviewers;
-      
+
       return allApproved && hasAllReviews;
     });
 
-    console.log(`Filtered ${payrollData.length} records to ${approvedData.length} fully approved employees`);
+    console.log(
+      `Filtered ${payrollData.length} records to ${approvedData.length} fully approved employees`,
+    );
     return approvedData;
   } catch (error) {
     console.error("Error in filterFullyApprovedEmployees:", error);
@@ -104,7 +108,7 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
                 gross_pay,id,
                 employee:employee_id (employee_number, first_name, last_name, middle_name),
                 payroll_run:payroll_run_id (payroll_month, id)
-            `
+            `,
     )
     .in("payroll_run_id", runIdList);
 
@@ -116,9 +120,9 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
   // If no data, return empty array
   if (!data || data.length === 0) return [];
 
-   // Get all payroll_detail_ids
-  const payrollDetailIds = data.map(item => item.id);
-  
+  // Get all payroll_detail_ids
+  const payrollDetailIds = data.map((item) => item.id);
+
   // Get all reviews for these payroll details
   const { data: reviews, error: reviewsError } = await supabase
     .from("payroll_reviews")
@@ -141,7 +145,7 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
 
   // Group reviews by payroll_detail_id
   const reviewsByDetail = {};
-  reviews.forEach(review => {
+  reviews.forEach((review) => {
     if (!reviewsByDetail[review.payroll_detail_id]) {
       reviewsByDetail[review.payroll_detail_id] = [];
     }
@@ -149,10 +153,10 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
   });
 
   // Filter data to only include fully approved employees
-  const approvedData = data.filter(detail => {
+  const approvedData = data.filter((detail) => {
     const detailReviews = reviewsByDetail[detail.id] || [];
     if (detailReviews.length === 0) return false;
-    const allApproved = detailReviews.every(status => status === "APPROVED");
+    const allApproved = detailReviews.every((status) => status === "APPROVED");
     const hasAllReviews = detailReviews.length >= totalReviewers;
     return allApproved && hasAllReviews;
   });
@@ -172,6 +176,9 @@ const fetchPayrollData = async (companyId, runId) => {
                 last_name,
                 middle_name,
                 phone,
+                email,
+                gender,
+                date_of_birth,
                 employee_number,
                 krapin,
                 nssf_number,
@@ -179,12 +186,14 @@ const fetchPayrollData = async (companyId, runId) => {
                 id_number,
                 citizenship,
                 employee_type,
-                has_disability
+                has_disability,
+                hire_date,
+                marital_status
             ),
             payroll_run:payroll_run_id (
                 payroll_number
             )
-        `
+        `,
     )
     .eq("payroll_run_id", runId);
 
@@ -202,9 +211,13 @@ const fetchPayrollData = async (companyId, runId) => {
     throw new Error("Unauthorized access to payroll run.");
   }
 
-   // Filter to only include fully approved employees
-  const approvedData = await filterFullyApprovedEmployees(data, companyId, runId);
-  
+  // Filter to only include fully approved employees
+  const approvedData = await filterFullyApprovedEmployees(
+    data,
+    companyId,
+    runId,
+  );
+
   return approvedData;
 };
 
@@ -263,7 +276,11 @@ export const getAnnualReportYears = async (req, res) => {
   } catch (error) {
     console.log("Debug code");
     console.error("getAnnualReportYears error:", error.message);
-    res.status(500).json({ error: error.message && "Internal server error while fetching available years." });
+    res.status(500).json({
+      error:
+        error.message &&
+        "Internal server error while fetching available years.",
+    });
   }
 };
 
@@ -278,7 +295,10 @@ export const generateAnnualGrossEarningsReport = async (req, res) => {
 
   // --- Helper to set the disposition header
   const getDisposition = (filename, isDownload) => {
-    const dispositionType = isDownload === "true" || isDownload === undefined ? "attachment" : "inline";
+    const dispositionType =
+      isDownload === "true" || isDownload === undefined
+        ? "attachment"
+        : "inline";
     return `${dispositionType}; filename="${filename}"`;
   };
 
@@ -491,19 +511,18 @@ export const generateAnnualGrossEarningsReport = async (req, res) => {
     // 🕒 Footer
     const footerRowIndex = rowIndex + 2;
     sheet.mergeCells(`A${footerRowIndex}:D${footerRowIndex}`);
-    sheet.getCell(
-      `A${footerRowIndex}`
-    ).value = `Printed on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+    sheet.getCell(`A${footerRowIndex}`).value =
+      `Printed on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
     sheet.getCell(`A${footerRowIndex}`).font = { italic: true, size: 9 };
 
     // 5. Send to client
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader(
       "Content-Disposition",
-      getDisposition(`Annual_Gross_Earnings_${year}.xlsx`, download)
+      getDisposition(`Annual_Gross_Earnings_${year}.xlsx`, download),
     );
 
     await workbook.xlsx.write(res);
@@ -525,7 +544,10 @@ export const generateReport = async (req, res) => {
 
   // --- Helper to set the disposition header
   const getDisposition = (filename, isDownload) => {
-    const dispositionType = isDownload === "true" || isDownload === undefined ? "attachment" : "inline";
+    const dispositionType =
+      isDownload === "true" || isDownload === undefined
+        ? "attachment"
+        : "inline";
     return `${dispositionType}; filename="${filename}"`;
   };
 
@@ -543,7 +565,7 @@ export const generateReport = async (req, res) => {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`KRA_SEC_B1_${runId}.csv`, download)
+          getDisposition(`KRA_SEC_B1_${runId}.csv`, download),
         );
         res.end(Buffer.from(kraCsv, "utf-8"));
         break;
@@ -552,11 +574,11 @@ export const generateReport = async (req, res) => {
         const nssfExcelBuffer = await generateNssfReturn(payrollData);
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`NSSF_Return_${runId}.xlsx`, download)
+          getDisposition(`NSSF_Return_${runId}.xlsx`, download),
         );
         res.send(nssfExcelBuffer);
         break;
@@ -564,11 +586,11 @@ export const generateReport = async (req, res) => {
         const shifExcelBuffer = await generateShifReturn(payrollData);
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`SHIF_Return_${runId}.xlsx`, download)
+          getDisposition(`SHIF_Return_${runId}.xlsx`, download),
         );
         res.send(shifExcelBuffer);
         break;
@@ -577,7 +599,7 @@ export const generateReport = async (req, res) => {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Housing_Levy_${runId}.csv`, download)
+          getDisposition(`Housing_Levy_${runId}.csv`, download),
         );
         res.end(Buffer.from(housingLevyCsv, "utf-8"));
         break;
@@ -585,20 +607,24 @@ export const generateReport = async (req, res) => {
         const helbExcelBuffer = await generateHelbReport(payrollData);
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`HELB_Report_${runId}.xlsx`, download)
+          getDisposition(`HELB_Report_${runId}.xlsx`, download),
         );
         res.send(helbExcelBuffer);
         break;
       case "bank-payment":
-        const bankCsv = await generateBankPaymentFile(payrollData);
+        const companyDetails = await fetchCompanyDetails(companyId);
+        const bankCsv = await generateBankPaymentFile(
+          payrollData,
+          companyDetails,
+        );
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Bank_Payments_${runId}.csv`, download)
+          getDisposition(`Bank_Payments_${runId}.csv`, download),
         );
         res.end(Buffer.from(bankCsv, "utf-8"));
         break;
@@ -607,7 +633,7 @@ export const generateReport = async (req, res) => {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`M-Pesa_Payments_${runId}.csv`, download)
+          getDisposition(`M-Pesa_Payments_${runId}.csv`, download),
         );
         res.end(Buffer.from(mpesaCsv, "utf-8"));
         break;
@@ -616,7 +642,7 @@ export const generateReport = async (req, res) => {
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Cash_Sheet_${runId}.pdf`, download)
+          getDisposition(`Cash_Sheet_${runId}.pdf`, download),
         );
         res.send(cashPdfBuffer);
         break;
@@ -624,45 +650,45 @@ export const generateReport = async (req, res) => {
         const summaryExcelBuffer = await generateGenericExcelReport(
           payrollData,
           "Payroll Summary",
-          companyDetails
+          companyDetails,
         );
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Payroll_Summary_${runId}.xlsx`, download)
+          getDisposition(`Payroll_Summary_${runId}.xlsx`, download),
         );
         res.send(summaryExcelBuffer);
         break;
       case "allowance-report":
         const allowanceExcelBuffer = await generateGenericExcelReport(
           payrollData,
-          "Allowance Report"
+          "Allowance Report",
         );
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Allowance_Report_${runId}.xlsx`, download)
+          getDisposition(`Allowance_Report_${runId}.xlsx`, download),
         );
         res.send(allowanceExcelBuffer);
         break;
       case "deduction-report":
         const deductionExcelBuffer = await generateGenericExcelReport(
           payrollData,
-          "Deduction Report"
+          "Deduction Report",
         );
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          getDisposition(`Deduction_Report_${runId}.xlsx`, download)
+          getDisposition(`Deduction_Report_${runId}.xlsx`, download),
         );
         res.send(deductionExcelBuffer);
         break;
@@ -694,96 +720,73 @@ const generateKraSecB1 = (data) => {
 
   // Define the fields for the CSV file. This acts as the header.
   const kraRecords = data.map((record) => {
-    const allowancesString = record.allowances_details;
-    let allowances = [];
-    if (
-      typeof allowancesString === "string" &&
-      allowancesString.trim() !== ""
-    ) {
-      try {
-        allowances = JSON.parse(allowancesString);
-      } catch (e) {
-        console.error(
-          "Failed to parse allowances_details for record:",
-          record.id,
-          e
-        );
-      }
-    }
+    // Parse allowances and deductions
+    const allowances =
+      typeof record.allowances_details === "string"
+        ? JSON.parse(record.allowances_details || "[]")
+        : record.allowances_details || [];
 
-    const getAllowanceValue = (name, isCash = false) => {
-      const allowance = allowances.find((a) =>
-        a.name.toLowerCase().includes(name.toLowerCase())
-      );
-      if (allowance && allowance.is_cash === isCash) {
-        return parseFloat(allowance.value);
-      }
-      return 0;
+    const deductions =
+      typeof record.deductions_details === "string"
+        ? JSON.parse(record.deductions_details || "[]")
+        : record.deductions_details || [];
+
+    // Helper function to get allowance by code
+    const getAllowanceByCode = (code) => {
+      return allowances.find((a) => a.code === code);
     };
 
-    // Non-cash allowances
-    const housingAllowance = getAllowanceValue("housing", false);
-    const carAllowance = getAllowanceValue("car", false);
-    const mealsAllowance = getAllowanceValue("meals", false);
+    // Helper function to get deduction by code
+    const getDeductionByCode = (code) => {
+      return deductions.find((d) => d.code === code);
+    };
 
-    // Other cash benefits
-    const otherCashBenefits = allowances
-      .filter((a) => a.is_cash === true)
-      .reduce((sum, a) => sum + parseFloat(a.value), 0);
+    // Get specific allowances by code
+    const housingAllowance = getAllowanceByCode("HOUSING");
+    const carAllowance = getAllowanceByCode("CAR");
+    const mealsAllowance = getAllowanceByCode("MEAL");
 
-    // Other non-cash benefits
+    // Calculate cash allowances (all cash allowances)
+    const cashAllowances = allowances
+      .filter((a) => a.type === "CASH" || a.is_cash === true)
+      .reduce((sum, a) => sum + parseFloat(a.value || 0), 0);
+
+    // Calculate non-cash benefits excluding the ones we handle separately
     const otherNonCashBenefits = allowances
       .filter(
         (a) =>
-          !["housing", "car", "meals"].some((n) =>
-            a.name.toLowerCase().includes(n)
-          ) && a.is_cash === false
+          (a.type?.startsWith("NON_CASH") || a.is_cash === false) &&
+          !["HOUSING", "CAR", "MEAL"].includes(a.code),
       )
-      .reduce((sum, a) => sum + parseFloat(a.value), 0);
+      .reduce((sum, a) => sum + parseFloat(a.value || 0), 0);
 
-    // 2. Handle deductions
-    let deductions = [];
-    if (
-      typeof record.deductions_details === "string" &&
-      record.deductions_details.trim() !== ""
-    ) {
-      try {
-        deductions = JSON.parse(record.deductions_details);
-      } catch (e) {
-        console.error(
-          "Failed to parse deductions_details for record:",
-          record.id,
-          e
-        );
-      }
-    }
+    // Get specific deductions
+    const mortgageDeduction = getDeductionByCode("MORTGAGE");
+    const pensionDeduction = getDeductionByCode("PENSION");
+    const prmfDeduction = getDeductionByCode("PRMF"); // Post Retirement Medical Fund
+    const insuranceDeduction = deductions.find(
+      (d) => d.code === "INS" || d.name?.toLowerCase().includes("insurance"),
+    );
 
-    const getDeductionValue = (name) => {
-      const deduction = deductions.find((d) =>
-        d.name.toLowerCase().includes(name.toLowerCase())
-      );
-      return deduction ? parseFloat(deduction.value) : 0;
-    };
-
-    const mortgageInterest = getDeductionValue("mortgage");
-
-    // 3. Determine housing benefit status
-    const housingBenefitStatus =
-      housingAllowance > 0 ? "Employer's owned House" : "Benefit not given";
-
-    // 4. Calculate total non-cash benefits correctly
+    // Calculate total non-cash benefits (excluding housing which goes in separate field)
     const totalNonCashBenefits =
-      (record.total_non_cash_benefits || 0) -
-      housingAllowance -
-      carAllowance -
-      mealsAllowance;
+      (carAllowance?.value || 0) +
+      (mealsAllowance?.value || 0) +
+      otherNonCashBenefits;
 
-    // 5. Determine resident and disability status
+    // Determine housing benefit status
+    const housingBenefitStatus =
+      housingAllowance?.value > 0
+        ? "Employer's owned House"
+        : "Benefit not given";
+
+    // Determine resident and disability status
     const residentStatus =
-      record.employee.citizenship.toLowerCase() !== "kenyan"
+      record.employee?.citizenship?.toLowerCase() !== "kenyan"
         ? "Non-Resident"
         : "Resident";
-    const employeeDisabilityStatus = record.employee.has_disability
+
+    const employeeDisabilityStatus = record.employee?.has_disability
       ? "Yes"
       : "No";
 
@@ -797,19 +800,19 @@ const generateKraSecB1 = (data) => {
       employeeDisabilityStatus,
       "", // remember to fill this field with exemption certificate number if any
       formatCurrency(record.basic_salary || 0),
-      formatCurrency(carAllowance),
-      formatCurrency(mealsAllowance),
-      formatCurrency(totalNonCashBenefits),
+      formatCurrency(carAllowance?.value || 0),
+      formatCurrency(mealsAllowance?.value || 0),
+      formatCurrency(otherNonCashBenefits),
       housingBenefitStatus,
-      formatCurrency(housingAllowance) || "",
-      formatCurrency(otherCashBenefits),
+      formatCurrency(housingAllowance?.value || 0),
+      formatCurrency(cashAllowances),
       "", // Blank
-      formatCurrency(record.shif_deduction),
-      formatCurrency(record.nssf_deduction),
-      0.0, // other pension deductions not in payroll details
-      0.0, // post retirement medical fund not in payroll details
-      formatCurrency(mortgageInterest),
-      formatCurrency(record.housing_levy_deduction),
+      formatCurrency(record.shif_deduction || 0),
+      formatCurrency(record.nssf_deduction || 0),
+      formatCurrency(pensionDeduction?.value || 0), // Other pension deductions (PENSION only)
+      formatCurrency(prmfDeduction?.value || 0), // Post Retirement Medical Fund
+      formatCurrency(mortgageDeduction?.value || 0), // Mortgage interest
+      formatCurrency(record.housing_levy_deduction || 0),
       "", // Blank
       2400.0,
       record.insurance_relief || 0.0, // insurance relief not in payroll details
@@ -841,31 +844,91 @@ const generateNssfReturn = async (data) => {
   const worksheet = workbook.addWorksheet("NSSF Return");
 
   const headers = [
-    "Employee No.",
     "Surname",
+    "First Name",
     "Other names",
+    "Gender",
+    "Date of birth",
+    "Date of Employement",
+    "Marital Status",
     "ID number",
     "KRA pin",
     "NSSF Number",
-    "Gross Pay",
-    "Voluntary",
+    "Cell Phone",
+    "Email",
+    "Gross Salary",
+    "Employee Tier 1",
+    "Employer Tier 1",
+    "Total Tier 1",
+    "Employee Tier 2",
+    "Employer Tier 2",
+    "Total Tier 2",
   ];
   worksheet.addRow(headers);
 
   data.forEach((record) => {
+    // Calculate totals
+    const totalTier1 = parseFloat(record.nssf_tier1_deduction) * 2; // Employee + Employer
+    const totalTier2 = parseFloat(record.nssf_tier2_deduction) * 2; // Employee + Employer
     worksheet.addRow([
-      record.employee.employee_number,
       record.employee.last_name,
-      `${record.employee.first_name} ${
-        record.employee.middle_name || ""
-      }`.trim(),
+      record.employee.first_name,
+      record.employee.middle_name || "",
+      record.employee.gender,
+      record.employee.date_of_birth,
+      record.employee.hire_date,
+      record.employee.marital_status || "",
       record.employee.id_number,
       record.employee.krapin,
       record.employee.nssf_number,
+      record.employee.phone,
+      record.employee.email,
       parseFloat(record.gross_pay),
-      0, // Assuming voluntary is 0 for now
+      parseFloat(record.nssf_tier1_deduction),
+      parseFloat(record.nssf_tier1_deduction),
+      totalTier1,
+      parseFloat(record.nssf_tier2_deduction),
+      parseFloat(record.nssf_tier2_deduction),
+      totalTier2,
     ]);
   });
+
+  // Add a summary row at the bottom
+  const totals = data.reduce(
+    (acc, record) => {
+      acc.grossPay += parseFloat(record.gross_pay) || 0;
+      acc.tier1Employee += parseFloat(record.nssf_tier1_deduction) || 0;
+      acc.tier2Employee += parseFloat(record.nssf_tier2_deduction) || 0;
+      return acc;
+    },
+    { grossPay: 0, tier1Employee: 0, tier2Employee: 0 },
+  );
+
+  // Add empty row before summary
+  worksheet.addRow([]);
+
+  // Add summary row
+  worksheet.addRow([
+    "TOTALS",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    totals.grossPay.toFixed(2),
+    totals.tier1Employee.toFixed(2),
+    totals.tier1Employee.toFixed(2), // Employer matches employee
+    (totals.tier1Employee * 2).toFixed(2),
+    totals.tier2Employee.toFixed(2),
+    totals.tier2Employee.toFixed(2), // Employer matches employee
+    (totals.tier2Employee * 2).toFixed(2),
+  ]);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
@@ -967,7 +1030,7 @@ const generateHelbReport = async (data) => {
   return await workbook.xlsx.writeBuffer();
 };
 
-const generateBankPaymentFile = (data) => {
+const generateBankPaymentFile = (data, companyDetails) => {
   // Sort the data array by employee number
   data.sort((a, b) => {
     const codeA = a.employee?.employee_number || "";
@@ -978,31 +1041,60 @@ const generateBankPaymentFile = (data) => {
     });
   });
 
+  // Use company's bank account for debit account
+  const debitAccount = companyDetails?.account_number || "";
+
   const records = data
     .filter((r) => r.payment_method?.toLowerCase() === "bank")
     .map((record) => [
-      `${record.employee.first_name} ${record.employee.middle_name || ""} ${
-        record.employee.last_name
-      }`.trim(),
-      record.account_name,
-      record.account_number,
-      record.bank_name,
-      record.bank_code || "",
-      record.branch_name || "",
-      record.branch_code || "",
-      formatCurrency(record.net_pay),
-      `Payroll Ref ${record.payroll_run.payroll_number}`,
+      "", // Additional info 1 (leave blank)
+      `${record.employee.first_name || ""} ${record.employee.middle_name || ""} ${
+        record.employee.last_name || ""
+      }`.trim(), // Beneficiary Name
+      "", // Beneficiary Address (leave blank)
+      "", // BIC/SWIFT Code (leave blank)
+      record.branch_name || "", // Branch
+      record.bank_name || "", // Beneficiary Bank Name
+      "031", // DTB Branch Code (using branch_code from payroll_details)
+      record.account_number || "", // Beneficiary Account
+      formatCurrency(record.net_pay), // Payable Amount
+      "RTGS", // Payment Method (default to RTGS for bank payments)
+      `Payroll Ref ${record.payroll_run?.payroll_number || ""}`, // Additional info 2 (reference)
+      "KES", // Payable Currency (always KES for Kenya)
+      debitAccount, // Debit Account No from company
+      "", // Payment Instructions 1 (leave blank)
+      "", // Mobile service provider Code (leave blank for bank)
+      "", // Bene Mobile Number (leave blank for bank)
+      "", // Execution date
+      "", // Supporting Document Name (leave blank)
+      record.employee?.email || "", // Email
+      "BEN", // Charge Bourned By (BEN = Beneficiary, OUR = Ourselves, SHA = Shared)
+      "SALA", // Remittance Purpose code (SALA = Salary Payment)
+      `Salary payment for ${record.employee?.first_name || ""} ${record.employee?.last_name || ""}`, // Remittance Purpose details
     ]);
   const columns = [
-    "full names",
-    "account name",
-    "account number",
-    "bank name",
-    "bank code",
-    "branch name",
-    "branch code",
-    "amount",
-    "reference",
+    "Additional info 1",
+    "Beneficiary Name",
+    "Beneficiary Address",
+    "BIC/SWIFT Code",
+    "Branch",
+    "Beneficiary Bank Name",
+    "DTB Branch Code",
+    "Beneficiary Account",
+    "Payable Amount",
+    "Payment Method",
+    "Additional info 2",
+    "Payable Currency",
+    "Debit Account No",
+    "Payment Instructions 1",
+    "Mobile service provider Code",
+    "Bene Mobile Number",
+    "Execution Date",
+    "Supporting Document Name",
+    "Email",
+    "Charge Bourned By",
+    "Remittance Purpose code",
+    "Remittance Purpose details",
   ];
   return new Promise((resolve, reject) => {
     stringify(records, { header: true, columns: columns }, (err, result) => {
@@ -1148,7 +1240,7 @@ const generateGenericExcelReport = async (data, reportType, companyDetails) => {
     const payrollMonth = new Date(
       `${payrollNumber.split("-")[1].substring(4, 6)}/01/${payrollNumber
         .split("-")[1]
-        .substring(0, 4)}`
+        .substring(0, 4)}`,
     ).toLocaleString("default", { month: "long" });
     const payrollYear = payrollNumber.split("-")[1].substring(0, 4);
 
@@ -1309,7 +1401,7 @@ const generateGenericExcelReport = async (data, reportType, companyDetails) => {
           row.push(
             `${record.employee?.first_name || ""} ${
               record.employee?.last_name || ""
-            } ${record.employee?.middle_name || ""}`
+            } ${record.employee?.middle_name || ""}`,
           );
         } else if (totalsMapping[header]) {
           row.push(parseFloat(record[totalsMapping[header]] || 0));
@@ -1375,18 +1467,18 @@ const generateGenericExcelReport = async (data, reportType, companyDetails) => {
     worksheet.mergeCells(`B${lastRow}:D${lastRow}`);
     worksheet.mergeCells(
       `E${lastRow}:${String.fromCharCode(
-        70 + headers.length - 1 - 4
-      )}${lastRow}`
+        70 + headers.length - 1 - 4,
+      )}${lastRow}`,
     );
     worksheet.mergeCells(`B${lastRow + 1}:D${lastRow + 1}`);
     worksheet.mergeCells(
       `E${lastRow + 1}:${String.fromCharCode(70 + headers.length - 1 - 4)}${
         lastRow + 1
-      }`
+      }`,
     );
   } else if (reportType === "Allowance Report") {
     const worksheet = workbook.addWorksheet(reportType);
-     headers = ["Employee No", "Full Name", "Allowance Name", "Amount"];
+    headers = ["Employee No", "Full Name", "Allowance Name", "Amount"];
     worksheet.addRow(headers);
     data.forEach((record) => {
       const allowances = record.allowances_details || [];

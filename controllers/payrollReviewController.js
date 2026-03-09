@@ -115,6 +115,7 @@ export const getPayrollReportData = async (req, res) => {
         absent_days: item.absent_days || 0,
         absent_days_deduction: item.absent_days_deduction || 0,
         grossPay: item.gross_pay,
+        helbDeduction: item.helb_deduction,
         netPay: item.net_pay,
 
         // Overview Specific
@@ -141,7 +142,7 @@ export const getPayrollReportData = async (req, res) => {
         nssf: item.nssf_deduction,
         shif: item.shif_deduction,
         housingLevy: item.housing_levy_deduction,
-        otherDeductions: item.total_other_deductions,
+        otherDeductions: item.total_other_deductions - item.helb_deduction,
 
         // Review & Approve Specific
         paymentMethod: item.payment_method,
