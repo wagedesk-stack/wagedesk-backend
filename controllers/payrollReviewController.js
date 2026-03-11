@@ -42,7 +42,14 @@ export const getPayrollReportData = async (req, res) => {
           departments ( name ),
           job_titles ( title )
         ),
-        payroll_reviews ( id, status, company_reviewer_id )
+        payroll_reviews ( 
+          id, 
+          status, 
+          company_reviewer_id,
+          company_reviewers (
+            reviewer_level
+          )
+        )
       `,
       )
       .eq("payroll_run_id", runId);
@@ -62,11 +69,16 @@ export const getPayrollReportData = async (req, res) => {
       .slice(0, 4)
       .map(([name]) => name);
 
-    // Fetch total number of reviewers for this company to determine approval status
-    const { count: totalReviewers } = await supabase
+   // Fetch all reviewers for this company with their levels
+    const { data: allReviewers } = await supabase
       .from("company_reviewers")
-      .select("*", { count: "exact", head: true })
+      .select("id, reviewer_level")
       .eq("company_id", companyId);
+
+    // Separate reviewers by level
+    const level1Reviewers = allReviewers?.filter(r => r.reviewer_level === 1) || [];
+    const level2Reviewers = allReviewers?.filter(r => r.reviewer_level === 2) || [];
+    const level3Reviewers = allReviewers?.filter(r => r.reviewer_level === 3) || [];
 
     const reports = details.map((item) => {
       // Find the specific review entry for the current reviewer
@@ -89,18 +101,45 @@ export const getPayrollReportData = async (req, res) => {
         }
       });
 
-      // Calculate dynamic status for Review & Approve
-      const approvedCount =
-        item.payroll_reviews?.filter((r) => r.status === "APPROVED").length ||
-        0;
-      const rejectedCount =
-        item.payroll_reviews?.filter((r) => r.status === "REJECTED").length ||
-        0;
+      // Group reviews by reviewer level
+      const reviewsByLevel = {
+        1: [],
+        2: [],
+        3: []
+      };
+
+      item.payroll_reviews?.forEach(review => {
+        const level = review.company_reviewers?.reviewer_level;
+        if (level && [1, 2, 3].includes(level)) {
+          reviewsByLevel[level].push(review);
+        }
+      });
+
+      // Check if any level 1 or 2 reviewer has rejected
+      const hasLevel1Rejection = reviewsByLevel[1].some(r => r.status === "REJECTED");
+      const hasLevel2Rejection = reviewsByLevel[2].some(r => r.status === "REJECTED");
+      
+      // Check if all level 1 reviewers have approved
+      const allLevel1Approved = level1Reviewers.length > 0 
+        ? reviewsByLevel[1].length === level1Reviewers.length && 
+          reviewsByLevel[1].every(r => r.status === "APPROVED")
+        : true; // If no level 1 reviewers, consider it satisfied
+      
+      // Check if all level 2 reviewers have approved
+      const allLevel2Approved = level2Reviewers.length > 0
+        ? reviewsByLevel[2].length === level2Reviewers.length && 
+          reviewsByLevel[2].every(r => r.status === "APPROVED")
+        : true; // If no level 2 reviewers, consider it satisfied
 
       let reviewStatus = "PENDING";
-      if (rejectedCount > 0) reviewStatus = "REJECTED";
-      else if (approvedCount >= totalReviewers && totalReviewers > 0)
+      
+      if (hasLevel1Rejection || hasLevel2Rejection) {
+        reviewStatus = "REJECTED";
+      } else if (allLevel1Approved && allLevel2Approved) {
         reviewStatus = "APPROVED";
+      }
+      // If neither condition is met, status remains "PENDING"
+
 
       return {
         // Shared Fields

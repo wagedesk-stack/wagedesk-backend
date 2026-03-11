@@ -11,20 +11,23 @@ import path from "path";
 // Helper function to filter payroll details that are fully approved
 const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
   try {
-    // Get total number of reviewers for this company
-    const { count: totalReviewers, error: countError } = await supabase
+    // Get all reviewers for this company with their levels
+    const { data: allReviewers, error: reviewersError } = await supabase
       .from("company_reviewers")
-      .select("*", { count: "exact", head: true })
+      .select("id, reviewer_level")
       .eq("company_id", companyId);
 
-    if (countError) {
-      console.error("Error fetching reviewer count:", countError);
+    if (reviewersError) {
+      console.error("Error fetching reviewers:", reviewersError);
       return payrollData; // Fallback to return all data if error
     }
 
-    if (totalReviewers === 0) {
-      // No reviewers means auto-approved? Or return empty?
-      // Let's return all data if no reviewers configured
+    // Separate reviewers by level
+    const level1Reviewers = allReviewers?.filter(r => r.reviewer_level === 1) || [];
+    const level2Reviewers = allReviewers?.filter(r => r.reviewer_level === 2) || [];
+    
+    // If no level 1 or 2 reviewers, consider all employees as approved
+    if (level1Reviewers.length === 0 && level2Reviewers.length === 0) {
       return payrollData;
     }
 
@@ -33,10 +36,16 @@ const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
 
     if (payrollDetailIds.length === 0) return payrollData;
 
-    // Get all reviews for these payroll details
+     // Get all reviews for these payroll details with reviewer level info
     const { data: reviews, error: reviewsError } = await supabase
       .from("payroll_reviews")
-      .select("payroll_detail_id, status")
+      .select(`
+        payroll_detail_id, 
+        status,
+        company_reviewers (
+          reviewer_level
+        )
+      `)
       .in("payroll_detail_id", payrollDetailIds);
 
     if (reviewsError) {
@@ -44,35 +53,60 @@ const filterFullyApprovedEmployees = async (payrollData, companyId, runId) => {
       return payrollData;
     }
 
-    // Group reviews by payroll_detail_id
+    // Group reviews by payroll_detail_id and by level
     const reviewsByDetail = {};
     reviews.forEach((review) => {
-      if (!reviewsByDetail[review.payroll_detail_id]) {
-        reviewsByDetail[review.payroll_detail_id] = [];
+      const detailId = review.payroll_detail_id;
+      const level = review.company_reviewers?.reviewer_level;
+      
+      if (!reviewsByDetail[detailId]) {
+        reviewsByDetail[detailId] = {
+          level1: [],
+          level2: [],
+          all: []
+        };
       }
-      reviewsByDetail[review.payroll_detail_id].push(review.status);
+      
+      // Only consider level 1 and 2 reviewers
+      if (level === 1) {
+        reviewsByDetail[detailId].level1.push(review.status);
+      } else if (level === 2) {
+        reviewsByDetail[detailId].level2.push(review.status);
+      }
+      
+      reviewsByDetail[detailId].all.push(review);
     });
 
-    // Filter payroll data to only include fully approved employees
+     // Filter payroll data to only include employees approved by level 1 and 2
     const approvedData = payrollData.filter((detail) => {
-      const detailReviews = reviewsByDetail[detail.id] || [];
-
+      const detailReviews = reviewsByDetail[detail.id];
+      
       // If no reviews for this detail, it's not approved
-      if (detailReviews.length === 0) return false;
+      if (!detailReviews) return false;
 
-      // Check if all reviews are APPROVED
-      const allApproved = detailReviews.every(
-        (status) => status === "APPROVED",
-      );
+      // Check for any rejections from level 1 or 2
+      const hasLevel1Rejection = detailReviews.level1.some(status => status === "REJECTED");
+      const hasLevel2Rejection = detailReviews.level2.some(status => status === "REJECTED");
+      
+      if (hasLevel1Rejection || hasLevel2Rejection) return false;
 
-      // Check if we have reviews from all reviewers
-      const hasAllReviews = detailReviews.length >= totalReviewers;
+      // Check if all level 1 reviewers have approved
+      const allLevel1Approved = level1Reviewers.length > 0 
+        ? detailReviews.level1.length === level1Reviewers.length && 
+          detailReviews.level1.every(status => status === "APPROVED")
+        : true; // If no level 1 reviewers, consider it satisfied
+      
+      // Check if all level 2 reviewers have approved
+      const allLevel2Approved = level2Reviewers.length > 0
+        ? detailReviews.level2.length === level2Reviewers.length && 
+          detailReviews.level2.every(status => status === "APPROVED")
+        : true; // If no level 2 reviewers, consider it satisfied
 
-      return allApproved && hasAllReviews;
+      return allLevel1Approved && allLevel2Approved;
     });
 
     console.log(
-      `Filtered ${payrollData.length} records to ${approvedData.length} fully approved employees`,
+      `Filtered ${payrollData.length} records to ${approvedData.length} employees approved by level 1 and 2 reviewers`,
     );
     return approvedData;
   } catch (error) {
@@ -88,7 +122,7 @@ const fetchAnnualRunIds = async (companyId, year) => {
     .select("id, payroll_month")
     .eq("company_id", companyId)
     .eq("payroll_year", year)
-    .eq("status", "APPROVED"); // Only approved runs should be included in the annual report
+    .in("status", ["APPROVED", "LOCKED", "PAID"]); // Only approved runs should be included in the annual report
 
   if (error) {
     throw new Error("Failed to fetch annual payroll runs.");
@@ -123,10 +157,16 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
   // Get all payroll_detail_ids
   const payrollDetailIds = data.map((item) => item.id);
 
-  // Get all reviews for these payroll details
+  // Get all reviews for these payroll details with reviewer level info
   const { data: reviews, error: reviewsError } = await supabase
     .from("payroll_reviews")
-    .select("payroll_detail_id, status")
+    .select(`
+      payroll_detail_id, 
+      status,
+      company_reviewers (
+        reviewer_level
+      )
+    `)
     .in("payroll_detail_id", payrollDetailIds);
 
   if (reviewsError) {
@@ -134,31 +174,69 @@ const fetchAnnualGrossPayData = async (runIds, companyId) => {
     return data; // Fallback to return all data
   }
 
-  // Get total reviewers count per run (since different runs might have different reviewers?)
-  // For simplicity, we'll get the reviewer count for the company once
-  const { count: totalReviewers } = await supabase
+  // Get all reviewers for this company with their levels
+  const { data: allReviewers } = await supabase
     .from("company_reviewers")
-    .select("*", { count: "exact", head: true })
+    .select("id, reviewer_level")
     .eq("company_id", companyId);
 
-  if (totalReviewers === 0) return data; // No reviewers, return all
+  // Separate reviewers by level
+  const level1Reviewers = allReviewers?.filter(r => r.reviewer_level === 1) || [];
+  const level2Reviewers = allReviewers?.filter(r => r.reviewer_level === 2) || [];
 
-  // Group reviews by payroll_detail_id
+  // If no level 1 or 2 reviewers, return all data
+  if (level1Reviewers.length === 0 && level2Reviewers.length === 0) {
+    return data;
+  }
+
+
+   // Group reviews by payroll_detail_id and by level
   const reviewsByDetail = {};
   reviews.forEach((review) => {
-    if (!reviewsByDetail[review.payroll_detail_id]) {
-      reviewsByDetail[review.payroll_detail_id] = [];
+    const detailId = review.payroll_detail_id;
+    const level = review.company_reviewers?.reviewer_level;
+    
+    if (!reviewsByDetail[detailId]) {
+      reviewsByDetail[detailId] = {
+        level1: [],
+        level2: []
+      };
     }
-    reviewsByDetail[review.payroll_detail_id].push(review.status);
+    
+    // Only consider level 1 and 2 reviewers
+    if (level === 1) {
+      reviewsByDetail[detailId].level1.push(review.status);
+    } else if (level === 2) {
+      reviewsByDetail[detailId].level2.push(review.status);
+    }
   });
 
-  // Filter data to only include fully approved employees
+ // Filter data to only include employees approved by level 1 and 2
   const approvedData = data.filter((detail) => {
-    const detailReviews = reviewsByDetail[detail.id] || [];
-    if (detailReviews.length === 0) return false;
-    const allApproved = detailReviews.every((status) => status === "APPROVED");
-    const hasAllReviews = detailReviews.length >= totalReviewers;
-    return allApproved && hasAllReviews;
+    const detailReviews = reviewsByDetail[detail.id];
+    
+    // If no reviews for this detail, it's not approved
+    if (!detailReviews) return false;
+
+    // Check for any rejections from level 1 or 2
+    const hasLevel1Rejection = detailReviews.level1.some(status => status === "REJECTED");
+    const hasLevel2Rejection = detailReviews.level2.some(status => status === "REJECTED");
+    
+    if (hasLevel1Rejection || hasLevel2Rejection) return false;
+
+    // Check if all level 1 reviewers have approved
+    const allLevel1Approved = level1Reviewers.length > 0 
+      ? detailReviews.level1.length === level1Reviewers.length && 
+        detailReviews.level1.every(status => status === "APPROVED")
+      : true; // If no level 1 reviewers, consider it satisfied
+    
+    // Check if all level 2 reviewers have approved
+    const allLevel2Approved = level2Reviewers.length > 0
+      ? detailReviews.level2.length === level2Reviewers.length && 
+        detailReviews.level2.every(status => status === "APPROVED")
+      : true; // If no level 2 reviewers, consider it satisfied
+
+    return allLevel1Approved && allLevel2Approved;
   });
 
   return approvedData;
